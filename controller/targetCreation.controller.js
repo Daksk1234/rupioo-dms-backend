@@ -751,21 +751,108 @@ export const DeleteTargetCreation = async (req, res, next) => {
   }
 };
 
-export const UpdateTargetCreation = async (req, res, next) => {
+export const UpdateTargetCreation = async (req, res) => {
   try {
     const targetId = req.params.id;
-    const existingTarget = await TargetCreation.findById(targetId);
-    if (!existingTarget) {
+    const existing = await TargetCreation.findById(targetId);
+    if (!existing) {
       return res.status(404).json({ error: "Target not found", status: false });
-    } else {
-      const updatedTarget = req.body;
-      await TargetCreation.findByIdAndUpdate(targetId, updatedTarget, {
-        new: true,
-      });
-      return res
-        .status(200)
-        .json({ message: "Target Updated Successfully", status: true });
     }
+
+    const {
+      date,
+      startDate,
+      endDate,
+      partyId,
+      partyName, // ✅ human name
+      products = [],
+      grandTotal,
+      created_by,
+      salesPersonId,
+      salesPersonName, // ✅ human name
+      incrementPercent,
+    } = req.body || {};
+
+    // If partyId provided, make sure it's valid and keep database in sync
+    if (partyId) {
+      const party =
+        (await Customer.findById(partyId)) ||
+        (await Customer.findOne({ sId: partyId }));
+      if (!party) {
+        return res
+          .status(404)
+          .json({ error: "Customer not found", status: false });
+      }
+      existing.partyId = partyId;
+      // persist readable party name (fallbacks)
+      existing.partyName =
+        (partyName || "").toString().trim() ||
+        party?.CompanyName ||
+        party?.name ||
+        party?.companyName ||
+        existing.partyName ||
+        "—";
+      existing.database = party.database || existing.database;
+    } else if (typeof partyName !== "undefined") {
+      // allow changing only the name if needed
+      existing.partyName =
+        (partyName || "").toString().trim() || existing.partyName || "—";
+    }
+
+    // Normalize products
+    const normalizedProducts = Array.isArray(products)
+      ? products.map((p) => {
+          const q = num(p?.qtyAssign);
+          const pr = num(p?.price);
+          const tt = p?.totalPrice != null ? num(p.totalPrice) : q * pr;
+          return {
+            productId: p?.productId,
+            qtyAssign: q,
+            price: pr,
+            totalPrice: tt,
+            assignPercentage: Array.isArray(p?.assignPercentage)
+              ? p.assignPercentage
+              : [],
+          };
+        })
+      : [];
+
+    if (normalizedProducts.length) {
+      existing.products = normalizedProducts;
+      existing.grandTotal =
+        grandTotal != null
+          ? num(grandTotal)
+          : normalizedProducts.reduce((s, p) => s + num(p.totalPrice), 0);
+    } else if (grandTotal != null) {
+      existing.grandTotal = num(grandTotal);
+    }
+
+    if (date) existing.date = date;
+    if (startDate) existing.startDate = startDate;
+    if (endDate) existing.endDate = endDate;
+    if (created_by) existing.created_by = created_by;
+
+    // IDs + human names
+    if (typeof salesPersonId !== "undefined") {
+      existing.salesPersonId = salesPersonId || "";
+    }
+    if (typeof salesPersonName !== "undefined") {
+      existing.salesPersonName =
+        (salesPersonName || "").toString().trim() || "Not Mapped";
+    }
+
+    if (typeof incrementPercent !== "undefined") {
+      existing.incrementPercent = num(incrementPercent);
+    }
+
+    await existing.save();
+    return res
+      .status(200)
+      .json({
+        message: "Target Updated Successfully",
+        status: true,
+        data: existing,
+      });
   } catch (err) {
     console.error(err);
     return res
@@ -2588,11 +2675,11 @@ const number = (v, d = 0) => {
 };
 
 export const SavePartyTarget = async (req, res) => {
-  const filePath = req.file?.path; // disk storage (multer disk)
-  const fileBuffer = req.file?.buffer; // memory storage (multer memory)
+  const filePath = req.file?.path; // multer disk
+  const fileBuffer = req.file?.buffer; // multer memory
 
   try {
-    // ===================== PATH A: Excel file present =====================
+    // ===================== PATH A: Excel upload =====================
     if (filePath || fileBuffer) {
       const workbook = new ExcelJS.Workbook();
       if (fileBuffer) {
@@ -2601,82 +2688,96 @@ export const SavePartyTarget = async (req, res) => {
         await workbook.xlsx.readFile(filePath);
       }
 
-      const worksheet = workbook.getWorksheet(1) || workbook.worksheets?.[0];
-      if (!worksheet) {
+      const ws = workbook.getWorksheet(1) || workbook.worksheets?.[0];
+      if (!ws) {
         return res
           .status(400)
           .json({ message: "Invalid or empty Excel file", status: false });
       }
 
-      // read header row
-      const headerRow = worksheet.getRow(1);
-      const headings = (headerRow?.values || []).slice(1);
+      const headerRow = ws.getRow(1);
+      const headings = (headerRow?.values || []).slice(1); // 1-indexed row → ignore col 0
+      const grouped = {};
 
-      const groupedData = {};
-      const getKey = (row) =>
+      const keyOf = (row) =>
         `${row.salesPersonId || ""}_${row.partyId || ""}_${
           row.created_by || req.body?.created_by || ""
-        }_${row.month || ""}`;
+        }_${row.month || row.date || ""}`;
 
-      for (let i = 2; i <= worksheet.actualRowCount; i++) {
-        const row = worksheet.getRow(i);
+      for (let r = 2; r <= ws.actualRowCount; r++) {
+        const row = ws.getRow(r);
         if (!row) continue;
-
         const rowData = {};
-        headings.forEach((heading, idx) => {
-          const cell = row.getCell(idx + 1);
-          const value = cell?.value;
-          rowData[heading] =
-            typeof value === "object" && value?.text ? value.text : value;
+        headings.forEach((h, i) => {
+          const cell = row.getCell(i + 1);
+          const v = cell?.value;
+          rowData[h] = typeof v === "object" && v?.text ? v.text : v;
         });
 
         let {
           salesPersonId,
+          salesPersonName, // optional in sheet
           partyId,
+          partyName, // optional in sheet
           productId,
           qtyAssign,
           price,
-          month,
+          month, // e.g., "April-2025" OR just "April"
+          date, // alias
           percentage, // per-line increment %
           created_by,
+          financialYear, // optional in sheet (e.g., "2025-26")
+          monthName, // optional in sheet (e.g., "April")
         } = rowData;
 
-        // skip empty rows
+        // skip empty lines
         if (!partyId && !productId) continue;
 
-        const key = getKey({
+        const key = keyOf({
           salesPersonId,
           partyId,
           created_by,
-          month,
+          month: month || date,
         });
 
-        if (!groupedData[key]) {
-          groupedData[key] = {
+        if (!grouped[key]) {
+          // try to normalize a doc-level date from FY inputs if present
+          const computedDate =
+            date ||
+            month ||
+            monthYearForFY(
+              (monthName || "").toString(),
+              (financialYear || "").toString()
+            ) ||
+            "";
+
+          grouped[key] = {
             salesPersonId: salesPersonId || "",
-            partyId: partyId || "",
+            salesPersonName:
+              (salesPersonName || "").toString().trim() || "Not Mapped",
+            partyId: (partyId || "").toString(),
+            partyName: (partyName || "").toString().trim(), // may fill later from DB
             created_by: req.body?.created_by || created_by || "",
-            date: (month ?? "").toString(),
+            date: (computedDate ?? "").toString(),
             products: [],
-            // Excel path doesn't include a doc-level incrementPercent; keep per-line only.
-            incrementPercent: undefined,
+            incrementPercent: undefined, // Excel path doesn't override doc-level percent
           };
         }
 
         const q = num(qtyAssign);
         if (q > 0) {
           const pct = num(percentage);
-          const prc = num(price);
-          const adjustedQty = q + (q * pct) / 100;
+          const pr = num(price);
+          const adjusted = q + (q * pct) / 100;
 
-          groupedData[key].products.push({
+          grouped[key].products.push({
             productId,
-            qtyAssign: adjustedQty,
-            price: prc,
-            totalPrice: adjustedQty * prc,
+            qtyAssign: adjusted,
+            price: pr,
+            totalPrice: adjusted * pr,
             assignPercentage: [
               {
-                month: (month ?? "").toString(),
+                month: (month || date || grouped[key].date || "").toString(),
                 percentage: pct,
               },
             ],
@@ -2684,18 +2785,16 @@ export const SavePartyTarget = async (req, res) => {
         }
       }
 
-      const savedDocuments = [];
+      const saved = [];
 
-      for (const key in groupedData) {
-        const entry = groupedData[key];
-
+      for (const k in grouped) {
+        const entry = grouped[k];
         if (!entry.partyId || !entry.products?.length) continue;
 
-        // partyId in sheets might be sId; fallback to _id
+        // partyId accepts _id or sId
         const party =
           (await Customer.findOne({ sId: entry.partyId })) ||
           (await Customer.findById(entry.partyId));
-
         if (!party) {
           return res.status(404).json({
             message: `Customer with ID ${entry.partyId} not found`,
@@ -2704,13 +2803,20 @@ export const SavePartyTarget = async (req, res) => {
         }
 
         entry.database = party.database;
+        // fill partyName if not provided
+        if (!entry.partyName) {
+          entry.partyName =
+            party.CompanyName || party.name || party.companyName || "—";
+        }
+
+        // compute totals
         entry.grandTotal = entry.products.reduce(
-          (sum, p) => sum + num(p.totalPrice),
+          (s, p) => s + num(p.totalPrice),
           0
         );
 
+        // upsert by (partyId + date) if date present
         if (entry.date) {
-          // upsert by (partyId + date)
           const existing = await TargetCreation.findOne({
             partyId: entry.partyId,
             date: entry.date,
@@ -2722,39 +2828,47 @@ export const SavePartyTarget = async (req, res) => {
             existing.created_by = entry.created_by || existing.created_by;
             existing.salesPersonId =
               entry.salesPersonId || existing.salesPersonId || "";
-            // keep incrementPercent if already present; Excel path doesn't override it
+            if (entry.salesPersonName)
+              existing.salesPersonName = entry.salesPersonName;
+            if (entry.partyName) existing.partyName = entry.partyName; // <-- persist name
             await existing.save();
-            savedDocuments.push(existing);
+            saved.push(existing);
             continue;
           }
         }
 
         const created = await TargetCreation.create(entry);
-        savedDocuments.push(created);
+        saved.push(created);
       }
 
       return res.status(200).json({
-        message: `${savedDocuments.length} target(s) processed successfully.`,
+        message: `${saved.length} target(s) processed successfully.`,
         status: true,
-        data: savedDocuments,
+        data: saved,
       });
     }
 
-    // ===================== PATH B: JSON payload (no file) =====================
-    // Expected:
+    // ===================== PATH B: JSON create/update =====================
+    // Accepts:
     // {
     //   partyId: "<_id or sId>",
-    //   products: [{ productId, qtyAssign, price, totalPrice, assignPercentage: [...] }],
-    //   created_by: "<user _id>",
-    //   grandTotal?: number,
-    //   date?: "Sep-2025",
-    //   month?: "Sep-2025",       // alias
-    //   startDate?: "...", endDate?: "...",
-    //   salesPersonId?: "<_id>",  // saved at doc-level
-    //   incrementPercent?: number // ✅ NEW: doc-level increment %
+    //   partyName?: "Customer Co Pvt Ltd",  // ✅ NEW (optional, auto-filled if missing)
+    //   products: [{ productId, qtyAssign, price, totalPrice?, assignPercentage: [...] }],
+    //   created_by,
+    //   grandTotal?,
+    //   date?: "Apr-2026",                  // OR:
+    //   month?: "Apr-2026",
+    //   // FY-aware inputs (preferred):
+    //   financialYear?: "2025-26",          // ✅ NEW
+    //   monthName?: "April",                 // ✅ NEW
+    //   startDate?, endDate?,
+    //   salesPersonId?: "<_id>",
+    //   salesPersonName?: "Daksh SP",       // ✅ persist human name
+    //   incrementPercent?: number
     // }
     const {
       partyId,
+      partyName,
       products = [],
       created_by,
       grandTotal,
@@ -2763,7 +2877,10 @@ export const SavePartyTarget = async (req, res) => {
       startDate,
       endDate,
       salesPersonId,
-      incrementPercent, // ✅ from FE
+      salesPersonName,
+      incrementPercent,
+      financialYear, // NEW
+      monthName, // NEW
     } = req.body || {};
 
     if (!partyId || !Array.isArray(products) || products.length === 0) {
@@ -2773,11 +2890,9 @@ export const SavePartyTarget = async (req, res) => {
       });
     }
 
-    // accept both _id and sId for customers
     const party =
       (await Customer.findById(partyId)) ||
       (await Customer.findOne({ sId: partyId }));
-
     if (!party) {
       return res.status(404).json({
         message: `Customer not found for partyId ${partyId}`,
@@ -2785,7 +2900,7 @@ export const SavePartyTarget = async (req, res) => {
       });
     }
 
-    const normalizedProducts = products.map((p) => {
+    const normalized = products.map((p) => {
       const q = num(p.qtyAssign);
       const pr = num(p.price);
       const tt = p.totalPrice != null ? num(p.totalPrice) : q * pr;
@@ -2800,32 +2915,44 @@ export const SavePartyTarget = async (req, res) => {
       };
     });
 
-    const computedGrand = normalizedProducts.reduce(
-      (s, p) => s + num(p.totalPrice),
-      0
-    );
+    const computedGrand = normalized.reduce((s, p) => s + num(p.totalPrice), 0);
+
+    // build FY-aware "date" value if not explicitly provided
+    const computedDate =
+      date ||
+      month ||
+      monthYearForFY(
+        (monthName || "").toString(),
+        (financialYear || "").toString()
+      );
 
     const payload = {
       partyId,
-      products: normalizedProducts,
+      partyName:
+        (partyName || "").toString().trim() ||
+        party.CompanyName ||
+        party.name ||
+        party.companyName ||
+        "—",
+      products: normalized,
       created_by,
       database: party.database,
       grandTotal: grandTotal != null ? num(grandTotal) : computedGrand,
-      date: date || month || undefined,
+      date: computedDate || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       salesPersonId: salesPersonId || "",
+      salesPersonName:
+        (salesPersonName || "").toString().trim() || "Not Mapped",
       incrementPercent:
-        incrementPercent != null ? num(incrementPercent) : undefined, // ✅ store
+        incrementPercent != null ? num(incrementPercent) : undefined,
     };
 
     if (payload.date) {
-      // upsert by (partyId + date)
       const existing = await TargetCreation.findOne({
         partyId: payload.partyId,
         date: payload.date,
       });
-
       if (existing) {
         existing.products = payload.products;
         existing.grandTotal = payload.grandTotal;
@@ -2834,11 +2961,13 @@ export const SavePartyTarget = async (req, res) => {
         existing.endDate = payload.endDate || existing.endDate;
         existing.salesPersonId =
           payload.salesPersonId || existing.salesPersonId || "";
+        if (payload.salesPersonName)
+          existing.salesPersonName = payload.salesPersonName;
+        if (payload.partyName) existing.partyName = payload.partyName;
         if (payload.incrementPercent !== undefined) {
-          existing.incrementPercent = payload.incrementPercent; // ✅ update/save %
+          existing.incrementPercent = payload.incrementPercent;
         }
         await existing.save();
-
         return res.status(200).json({
           message: "Target updated successfully",
           status: true,

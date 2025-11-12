@@ -77,6 +77,8 @@ import PincodeRouter from "./routes/pincode.route.js";
 import VisitRouter from "./routes/visit.route.js";
 import VisitPointRouter from "./routes/visitPoint.route.js";
 import GroupRouter from "./routes/group.routes.js";
+import ChallanRouter from "./routes/challan.route.js";
+import CombinedTargetRouter from "./routes/combinedTarget.route.js";
 import mongoose from "mongoose";
 import cors from "cors";
 import { increasePercentage } from "./controller/targetCreation.controller.js";
@@ -182,6 +184,8 @@ app.use("/pincode", PincodeRouter);
 app.use("/visit", VisitRouter);
 app.use("/visitpoint", VisitPointRouter);
 app.use("/groups", GroupRouter);
+app.use("/challans", ChallanRouter);
+app.use("/combined-targets", CombinedTargetRouter);
 mongoose
   .connect(process.env.DATABASE_URL, {
     useUnifiedTopology: true,

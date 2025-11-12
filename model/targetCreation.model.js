@@ -15,9 +15,13 @@ const TargetCreationSchema = new mongoose.Schema(
     salesPersonId: {
       type: String,
     },
+    salesPersonName: {
+      type: String,
+    },
     partyId: {
       type: String,
     },
+    partyName: { type: String },
     status: {
       type: String,
       default: "Active",
