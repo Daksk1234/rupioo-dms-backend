@@ -124,6 +124,10 @@ const ProductSchema = new mongoose.Schema(
     ProfitPercentage: {
       type: Number,
     },
+    profitColorCode: {
+      type: String,
+      default: null, // e.g. "#75fa8e", "#d9614c", etc.
+    },
   },
   { timestamps: true }
 );

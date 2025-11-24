@@ -37,6 +37,7 @@ import {
   viewApplyRules,
   viewApplyRulesById,
 } from "../controller/user.controller.js";
+import { verifyDeviceForLogin } from "../middleware/deviceAuth.js";
 
 const router = express.Router();
 // const upload = multer({ dest: "public/Images" })
@@ -74,6 +75,7 @@ router.get("/view-user-by-id/:id/:database", ViewUser);
 router.get("/delete-user/:id", DeleteUser);
 router.post("/update-user/:id", upload.any("files"), UpdateUser);
 
+// router.post("/signin", verifyDeviceForLogin, SignIn);
 router.post("/signin", SignIn);
 router.post("/sign-in-mob", signInWithMob);
 router.post("/verify-otp", verifyOTP);

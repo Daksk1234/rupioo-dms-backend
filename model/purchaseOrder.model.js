@@ -1,4 +1,3 @@
-// models/PurchaseOrder.js
 import mongoose from "mongoose";
 
 /* -------- Line item schema -------- */
@@ -99,7 +98,10 @@ const PurchaseOrderSchema = new mongoose.Schema(
     database: { type: String },
     invoiceId: { type: String },
     date: { type: Date },
+    poNumber: { type: String },
     DispatchDate: { type: String },
+    partyEmail: { type: String }, // store if you capture it during create
+    emailSentAt: { type: Date, default: null },
 
     fullName: { type: String },
     address: { type: String },

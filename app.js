@@ -79,10 +79,13 @@ import VisitPointRouter from "./routes/visitPoint.route.js";
 import GroupRouter from "./routes/group.routes.js";
 import ChallanRouter from "./routes/challan.route.js";
 import CombinedTargetRouter from "./routes/combinedTarget.route.js";
+import activityLoggerRoute from "./routes/activityLogger.route.js";
+import activityLogger from "./middleware/activityLogger.js";
 import mongoose from "mongoose";
 import cors from "cors";
 import { increasePercentage } from "./controller/targetCreation.controller.js";
 import customerCheckRouter from "./routes/customerCheck.route.js";
+import deviceRoutes from "./routes/device.routes.js";
 import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
 app.use(cors());
@@ -186,6 +189,9 @@ app.use("/visitpoint", VisitPointRouter);
 app.use("/groups", GroupRouter);
 app.use("/challans", ChallanRouter);
 app.use("/combined-targets", CombinedTargetRouter);
+app.use(activityLogger());
+app.use("/activity-logs", activityLoggerRoute);
+app.use("/devices", deviceRoutes);
 mongoose
   .connect(process.env.DATABASE_URL, {
     useUnifiedTopology: true,

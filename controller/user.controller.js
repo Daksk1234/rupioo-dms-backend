@@ -19,6 +19,7 @@ import { UserBranch } from "../model/userBranch.model.js";
 import { LoginVerificationMail } from "../service/sendmail.js";
 import { SubscriptionAdminPlan } from "../service/checkSubscriptionPlan.js";
 import { GroupBundle } from "../model/group.model.js";
+import ActivityLog from "../model/ActivityLog.js";
 dotenv.config();
 
 /** -------------------- NEW: helpers for Groups → permissions -------------------- */
@@ -41,6 +42,118 @@ const mergeGroupPermissions = (groups = []) => {
     pagename,
     permission,
   }));
+};
+
+const OPENCAGE_API_KEY =
+  process.env.OPENCAGE_API_KEY || "d10245fed7384c039fdd70b8967f540f";
+
+// Existing: local IP fallback
+const getClientIp = (req) => {
+  const xf = req.headers["x-forwarded-for"];
+  if (xf) {
+    const parts = String(xf)
+      .split(",")
+      .map((x) => x.trim());
+    if (parts.length) return parts[0];
+  }
+  return req.ip || req.connection?.remoteAddress || "";
+};
+
+// Existing: try api.ipify.org first
+const fetchPublicIp = async (req) => {
+  try {
+    const resp = await axios.get("https://api.ipify.org?format=json", {
+      timeout: 3000,
+    });
+    if (resp?.data?.ip) return resp.data.ip;
+  } catch (_) {
+    // ignore, fallback below
+  }
+  return getClientIp(req);
+};
+
+// ✅ NEW: reverse geocode latitude/longitude → city/state/pincode
+const reverseGeocodeOpenCage = async (latitude, longitude) => {
+  if (latitude == null || longitude == null) return {};
+
+  try {
+    const resp = await axios.get(
+      "https://api.opencagedata.com/geocode/v1/json",
+      {
+        params: {
+          key: OPENCAGE_API_KEY,
+          q: `${latitude},${longitude}`,
+          pretty: 1,
+          no_annotations: 1,
+        },
+        timeout: 4000,
+      }
+    );
+
+    const results = resp?.data?.results;
+    if (!Array.isArray(results) || !results.length) return {};
+
+    const components = results[0].components || {};
+
+    const city =
+      components.city ||
+      components.town ||
+      components.village ||
+      components.hamlet ||
+      components._normalized_city ||
+      "";
+
+    const state = components.state || components.province || "";
+
+    const pincode = components.postcode || "";
+
+    return { city, state, pincode };
+  } catch (_) {
+    // never block login if reverse geocode fails
+    return {};
+  }
+};
+
+const logLoginIfPrivileged = async (req, user, { latitude, longitude }) => {
+  try {
+    if (!user) return;
+    const roleName = (user.rolename?.roleName || "").trim();
+    const isMaster = roleName === "MASTER";
+    const isSuperAdmin = /super\s*admin/i.test(roleName);
+    if (!isMaster && !isSuperAdmin) return; // only MASTER / Super Admin
+
+    const now = new Date();
+    const ip = await fetchPublicIp(req);
+
+    // ✅ Get city/state/pincode from OpenCage (if lat/lng present)
+    const {
+      city = "",
+      state = "",
+      pincode = "",
+    } = await reverseGeocodeOpenCage(latitude, longitude);
+
+    await ActivityLog.create({
+      userId: user._id || null,
+      name: user.fullName || user.name || "",
+      email: user.email || "",
+      ip,
+      latitude: latitude ?? null,
+      longitude: longitude ?? null,
+      city,
+      state,
+      pincode, // ✅ stored in ActivityLog
+      ua: req.headers["user-agent"] || "",
+      device: "", // your middleware still derives detailed device/OS on other hits
+      loginAt: now,
+      logoutAt: now,
+      hitCount: 1,
+      methodLast: "POST",
+      pathLast: req.originalUrl || req.path || "/user/signin",
+      statusLast: 200,
+    });
+  } catch (_) {
+    // never block login on logging failure
+  }
 };
 
 /** NEW: plan-first, no role gating, no fragile populate */
@@ -590,6 +703,10 @@ export const SignIn = async (req, res, next) => {
       existingAccount.otp = otp;
       await LoginVerificationMail(existingAccount, otp);
       await existingAccount.save();
+
+      // NEW: activity log (MASTER success path – OTP sent)
+      await logLoginIfPrivileged(req, existingAccount, { latitude, longitude });
+
       return res.status(200).json({
         message: "otp send successfull",
         user: {
@@ -626,6 +743,9 @@ export const SignIn = async (req, res, next) => {
       const allowedPermission = await buildAllowedPermissionForUser(
         existingAccount
       );
+
+      // NEW: activity log (Super Admin / MASTER on successful login)
+      await logLoginIfPrivileged(req, existingAccount, { latitude, longitude });
 
       return res.json({
         message: "Login successful",

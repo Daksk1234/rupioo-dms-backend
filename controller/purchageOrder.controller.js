@@ -12,45 +12,54 @@ import { ledgerPartyForCredit } from "../service/ledger.js";
 import { Stock } from "../model/stock.js";
 import { Customer } from "../model/customer.model.js";
 
+// controllers/... (your purchaseOrder handler)
 export const purchaseOrder = async (req, res, next) => {
   try {
     const orderItems = req.body.orderItems;
     const user = await User.findOne({ _id: req.body.userId });
     if (!user) {
       return res.status(401).json({ message: "No user found", status: false });
-    } else {
-      for (const orderItem of orderItems) {
-        const product = await Product.findOne({ _id: orderItem.productId });
-        if (product) {
-          // product.purchaseDate = new Date()
-          // product.partyId = req.body.partyId;
-          // product.purchaseStatus = true
-          // product.basicPrice = await orderItem.basicPrice;
-          // product.landedCost = await orderItem.landedCost;
-          // await product.save();
-          // console.log(await product.save())
-          // const warehouse = { productId: orderItem.productId, unitType: orderItem.unitType, currentStock: orderItem.qty, transferQty: orderItem.qty, price: orderItem.price, totalPrice: orderItem.totalPrice, Size: orderItem.Size }
-          // await addProductInWarehouse(warehouse, product.warehouse)
-        } else {
-          return res
-            .status(404)
-            .json(`Product with ID ${orderItem.productId} not found`);
-        }
-      }
-      req.body.userId = user._id;
-      req.body.database = user.database;
-      const order = await PurchaseOrder.create(req.body);
-      return order
-        ? res.status(200).json({ orderDetail: order, status: true })
-        : res
-            .status(400)
-            .json({ message: "Something Went Wrong", status: false });
     }
+
+    // (existing product checks unchanged)
+    for (const orderItem of orderItems) {
+      const product = await Product.findOne({ _id: orderItem.productId });
+      if (!product) {
+        return res
+          .status(404)
+          .json(`Product with ID ${orderItem.productId} not found`);
+      }
+    }
+
+    // ✅ ensure db context on body
+    req.body.userId = user._id;
+    req.body.database = user.database;
+
+    // ✅ NEW: PO number = completed count + 2 (scoped to this database)
+    const completedCount = await PurchaseOrder.countDocuments({
+      database: user.database,
+      status: "completed",
+    });
+    req.body.poNumber = String(completedCount + 2);
+
+    const order = await PurchaseOrder.create(req.body);
+    return order
+      ? res.status(200).json({ orderDetail: order, status: true })
+      : res
+          .status(400)
+          .json({ message: "Something Went Wrong", status: false });
   } catch (err) {
+    // If you enabled the unique index above, handle duplicate gracefully
+    if (err?.code === 11000 && err?.keyPattern?.poNumber) {
+      return res
+        .status(409)
+        .json({ message: "PO number conflict. Please retry.", status: false });
+    }
     console.log(err);
     return res.status(500).json({ error: err, status: false });
   }
 };
+
 export const purchaseInvoiceOrder = async (req, res, next) => {
   try {
     let groupDiscount = 0;
@@ -355,7 +364,6 @@ export const updatePurchaseOrderStatus = async (req, res) => {
     return res.status(500).json({ error, status: false });
   }
 };
-
 export const updatePurchaseOrder = async (req, res, next) => {
   try {
     let groupDiscount = 0;
@@ -632,7 +640,6 @@ export const updatePurchaseOrder = async (req, res, next) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 };
-
 export const ProductWisePurchaseReport = async (req, res, next) => {
   try {
     const startDate = req.body.startDate ? new Date(req.body.startDate) : null;
@@ -680,7 +687,6 @@ export const ProductWisePurchaseReport = async (req, res, next) => {
       .json({ error: "Internal Server Error", status: false });
   }
 };
-
 export const deletePurchaseOrder = async (req, res, next) => {
   try {
     const order = await PurchaseOrder.findById(req.params.id);
@@ -704,7 +710,6 @@ export const deletePurchaseOrder = async (req, res, next) => {
       .json({ error: "Internal Server Error", status: false });
   }
 };
-
 // delete purchaseOrder after status completed
 // export const deletedPurchase = async (req, res, next) => {
 //     try {
@@ -825,7 +830,6 @@ export const deletedPurchase = async (req, res, next) => {
       .json({ error: "Internal Server Error", status: false });
   }
 };
-
 export const deleteAddProductInWarehouse = async (warehouse, warehouseId) => {
   try {
     const user = await Warehouse.findById(warehouseId);
@@ -889,7 +893,6 @@ export const DeleteClosingPurchase = async (orderItem, warehouse) => {
     console.log(err);
   }
 };
-
 // For DashBoard
 export const CreditorCalculate11 = async (req, res, next) => {
   try {
@@ -1016,7 +1019,6 @@ export const CreditorCalculate = async (req, res, next) => {
       .json({ error: "Internal Server Error", status: false });
   }
 };
-
 export const Purch = async (req, res, next) => {
   try {
     const date = new Date(req.body.date);
@@ -1158,5 +1160,143 @@ export const DeleteStockPurchase = async (orderItem, date, orderData) => {
     }
   } catch (error) {
     console.log("Error in DeleteStockPurchase:", error);
+  }
+};
+// controller/purchageOrder.controller.js
+import mongoose from "mongoose";
+import nodemailer from "nodemailer";
+// import { PurchaseOrder } from "../models/PurchaseOrder.js";
+
+/* --- helper: safely pick a 24-hex ObjectId out of any incoming string --- */
+const pickObjectId = (v) => {
+  const s = String(v ?? "").trim();
+  if (mongoose.isValidObjectId(s)) return s;
+  const m = s.match(/[a-fA-F0-9]{24}/);
+  return m && mongoose.isValidObjectId(m[0]) ? m[0] : null;
+};
+
+export const sendPurchaseOrderMail = async (req, res) => {
+  try {
+    // 1) sanitize id (prevents "…[object Object]" cast errors)
+    const orderId = pickObjectId(req.params?.id);
+    if (!orderId) {
+      return res
+        .status(400)
+        .json({ status: false, message: "Invalid order id." });
+    }
+
+    const database = req.body?.database;
+
+    // 2) fetch order
+    const order = await PurchaseOrder.findById(orderId);
+    if (!order) {
+      return res
+        .status(404)
+        .json({ status: false, message: "Order not found" });
+    }
+
+    // Optional safety: ensure the request targets the same database
+    if (database && order.database && database !== order.database) {
+      return res
+        .status(400)
+        .json({ status: false, message: "Database mismatch" });
+    }
+
+    // 3) resolve recipient email
+    // Prefer an explicit field saved on the order (partyEmail / email)
+    let toEmail = (order.partyEmail || order.email || "").trim();
+    if (!toEmail) {
+      return res.status(400).json({
+        status: false,
+        message: "No email found for this party/order.",
+      });
+    }
+
+    // 4) build a simple HTML mail (replace with your template if you want)
+    const rowsHtml = (order.orderItems || [])
+      .map(
+        (it, i) => `
+          <tr>
+            <td style="padding:6px;border:1px solid #e5e7eb;text-align:center">${
+              i + 1
+            }</td>
+            <td style="padding:6px;border:1px solid #e5e7eb">
+              ${it?.productData?.Product_Title || it?.productName || "-"}
+            </td>
+            <td style="padding:6px;border:1px solid #e5e7eb;text-align:right">${Number(
+              it?.qty ?? 0
+            )}</td>
+            <td style="padding:6px;border:1px solid #e5e7eb;text-align:right">${Number(
+              it?.price || it?.basicPrice || 0
+            ).toFixed(2)}</td>
+            <td style="padding:6px;border:1px solid #e5e7eb;text-align:right">${Number(
+              it?.taxableAmount || 0
+            ).toFixed(2)}</td>
+          </tr>`
+      )
+      .join("");
+
+    const html = `
+      <div style="font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif">
+        <h2>Purchase Order</h2>
+        <p>
+          <b>PO No:</b> ${order.poNumber || order.invoiceId || "-"}<br/>
+          <b>Date:</b> ${new Date(order.date || order.createdAt).toLocaleString(
+            "en-IN"
+          )}<br/>
+          <b>Party:</b> ${order.fullName || "-"}<br/>
+          <b>Total:</b> ₹${Number(
+            order.grandTotal || order.amount || 0
+          ).toFixed(2)}
+        </p>
+        <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;width:100%;max-width:760px">
+          <thead>
+            <tr>
+              <th style="padding:6px;border:1px solid #e5e7eb">#</th>
+              <th style="padding:6px;border:1px solid #e5e7eb;text-align:left">Item</th>
+              <th style="padding:6px;border:1px solid #e5e7eb">Qty</th>
+              <th style="padding:6px;border:1px solid #e5e7eb">Rate</th>
+              <th style="padding:6px;border:1px solid #e5e7eb">Taxable</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    `;
+
+    // 5) send the mail
+    const host = process.env.SMTP_HOST || "smtp.gmail.com";
+    const port = Number(process.env.SMTP_PORT || 587);
+    const secure = port === 465; // true for 465, false for 587/25 etc.
+    const user = process.env.EMAIL || process.env.SMTP_USER;
+    const pass = process.env.PASS || process.env.SMTP_PASS;
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+    });
+
+    await transporter.sendMail({
+      from: user,
+      to: toEmail,
+      subject: `Purchase Order ${
+        order.poNumber || order.invoiceId || ""
+      }`.trim(),
+      html,
+    });
+
+    // 6) mark as confirmed + stamp time (saved only if your schema has these fields)
+    order.status = "confirmed";
+    order.emailSentAt = new Date();
+    await order.save();
+
+    return res.status(200).json({ status: true, order });
+  } catch (err) {
+    console.error("sendPurchaseOrderMail error:", err);
+    return res
+      .status(500)
+      .json({ status: false, message: "Mail failed", error: err?.message });
   }
 };
