@@ -1,6 +1,6 @@
 import express from "express";
 import path from "path"
-import { OrderCancelWarehouse, ProductInWarehouse, SendOtpToDeliveryWarehouse, ViewOtp, ViewOtpWarehouse, ViewWarehouseByOrder, ViewWarehouseByOrderInvoice, ViewWarehouseByOrders, ViewWarehouseOrderCancel, ViewWarehouseOrderCompletedOrCancel, deleteGoodDispatch, saveGoodDispatch, sendOtp, updateGoodDispatch, updateOrderStatusByDeliveryBoy, viewGoodDispatch, viewGoodDispatchById, viewOrderForDeliveryBoy } from "../controller/goodDispatch.controller.js";
+import { requestOtpForReadyDispatch, verifyOtpForReadyDispatch, OrderCancelWarehouse, ProductInWarehouse, SendOtpToDeliveryWarehouse, ViewOtp, ViewOtpWarehouse, ViewWarehouseByOrder, ViewWarehouseByOrderInvoice, ViewWarehouseByOrders, ViewWarehouseOrderCancel, ViewWarehouseOrderCompletedOrCancel, deleteGoodDispatch, saveGoodDispatch, sendOtp, updateGoodDispatch, updateOrderStatusByDeliveryBoy, viewGoodDispatch, viewGoodDispatchById, viewOrderForDeliveryBoy } from "../controller/goodDispatch.controller.js";
 import multer from "multer";
 
 const router = express.Router();
@@ -26,6 +26,8 @@ router.put("/update-good-dispatch/:id", upload.any("files"), updateGoodDispatch)
 router.get("/view-order-list/:id/:database", viewOrderForDeliveryBoy)
 router.post("/send-otp/:id", sendOtp)
 router.get("/view-otp/:id", ViewOtp)
+router.post("/request-ready-dispatch-otp/:id", requestOtpForReadyDispatch);
+router.post("/verify-ready-dispatch-otp/:id", verifyOtpForReadyDispatch);
 router.post("/verify-authentication/:id", upload.single("file"), updateOrderStatusByDeliveryBoy);
 router.get("/view-order-warehouse/:id", ViewWarehouseByOrder);
 router.get("/view-orders-warehouse/:id", ViewWarehouseByOrders);

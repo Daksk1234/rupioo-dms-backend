@@ -1120,13 +1120,65 @@ export const ProductWiseSalesReport = async (req, res, next) => {
 // Order History App
 export const ViewOrderHistoryForPartySalesPerson = async (req, res, next) => {
   try {
-    const orders = await CreateOrder.find({
+    const { database, superAdminId } = req.params || {};
+
+    let orders = await CreateOrder.find({
       partyId: req.params.id,
       status: { $ne: "Deactive" },
     })
       .populate({ path: "orderItems.productId", model: "product" })
       .populate({ path: "userId", model: "user" })
       .populate({ path: "partyId", model: "customer" });
+
+    // ✅ database filter (optional)
+    if (database) {
+      const dbLower = String(database).trim().toLowerCase();
+      orders = (orders || []).filter((o) => {
+        const orderDb = String(
+          o?.database ||
+            o?.Database ||
+            o?.db ||
+            o?.userId?.database ||
+            o?.partyId?.database ||
+            ""
+        )
+          .trim()
+          .toLowerCase();
+
+        return orderDb ? orderDb === dbLower : true;
+      });
+    }
+
+    // ✅ superAdmin filter (optional)
+    if (superAdminId) {
+      const target = String(superAdminId).trim();
+
+      orders = (orders || []).filter((o) => {
+        let cand =
+          o?.superAdminId ||
+          (o?.superAdmin ? o.superAdmin._id || o.superAdmin.id : null) ||
+          o?.created_by ||
+          o?.createdBy ||
+          o?.adminId ||
+          o?.sellerId ||
+          (o?.userId
+            ? o.userId.created_by ||
+              o.userId.createdBy ||
+              o.userId.superAdminId ||
+              (o.userId.superAdmin
+                ? o.userId.superAdmin._id || o.userId.superAdmin.id
+                : null)
+            : null) ||
+          (o?.partyId ? o.partyId.created_by || o.partyId.createdBy : null) ||
+          null;
+
+        if (cand && typeof cand === "object") cand = cand._id || cand.id;
+        const sid = cand ? String(cand).trim() : "";
+
+        return sid ? sid === target : false;
+      });
+    }
+
     return res.status(200).json({ orderHistory: orders, status: true });
   } catch (err) {
     console.log(err);

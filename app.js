@@ -86,7 +86,8 @@ import cors from "cors";
 import { increasePercentage } from "./controller/targetCreation.controller.js";
 import customerCheckRouter from "./routes/customerCheck.route.js";
 import deviceRoutes from "./routes/device.routes.js";
-import { StockClose } from "./controller/warehouse.controller.js";
+import salesPersonTargetRoutes from "./routes/salesPersonTarget.route.js";
+// import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
 app.use(cors());
 dotenv.config();
@@ -192,6 +193,7 @@ app.use("/combined-targets", CombinedTargetRouter);
 app.use(activityLogger());
 app.use("/activity-logs", activityLoggerRoute);
 app.use("/devices", deviceRoutes);
+app.use("/salesperson-target", salesPersonTargetRoutes);
 mongoose
   .connect(process.env.DATABASE_URL, {
     useUnifiedTopology: true,

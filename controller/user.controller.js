@@ -1324,14 +1324,25 @@ export const updateUserWithExcel = async (req, res) => {
 export const UserList = async (req, res, next) => {
   try {
     const database = req.params.database;
-    const user = await User.find({ database: database })
+
+    // ⬇️ exclude docs having created_by: "" (invalid ObjectId)
+    const user = await User.find({
+      database: database,
+      created_by: { $ne: "" },
+    })
       .populate({ path: "created_by", model: "user" })
       .populate({ path: "rolename", model: "role" });
-    let customer = await Customer.find({ database: database })
+
+    let customer = await Customer.find({
+      database: database,
+      created_by: { $ne: "" },
+    })
       .sort({ sortorder: -1 })
       .populate({ path: "created_by", model: "user" })
       .populate({ path: "rolename", model: "role" });
+
     const data = user.concat(customer);
+
     return data.length > 0
       ? res.status(200).json({ User: data, status: true })
       : res.status(404).json({ message: "Not Found", status: false });

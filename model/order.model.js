@@ -221,6 +221,9 @@ const OrderSchema = new mongoose.Schema(
     NoOfPackage: {
       type: Number,
     },
+    isDelivered: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

@@ -66,8 +66,8 @@ export const saveCombinedTarget = async (req, res) => {
         const qty = num(row.getCell(ciQty)?.value ?? 0);
         if (!productId || qty <= 0) continue;
 
-        const price = num(ciPrice ? row.getCell(ciPrice)?.value ?? 0 : 0);
-        const pctRow = num(ciPct ? row.getCell(ciPct)?.value ?? 0 : 0);
+        const price = num(ciPrice ? (row.getCell(ciPrice)?.value ?? 0) : 0);
+        const pctRow = num(ciPct ? (row.getCell(ciPct)?.value ?? 0) : 0);
 
         if (!monthLabel && ciMonth) {
           const mv = row.getCell(ciMonth)?.value;
@@ -203,7 +203,10 @@ export const listCombinedTargets = async (req, res) => {
     const { database } = req.query || {};
     const q = {};
     if (database) q.database = database;
-    const data = await CombinedTarget.find(q).sort({ createdAt: -1 }).lean();
+    const data = await CombinedTarget.find(q)
+      .populate({ path: "products.productId", model: "product" })
+      .sort({ createdAt: -1 })
+      .lean();
     return res.json({ status: true, data });
   } catch (err) {
     console.error("listCombinedTargets error:", err);

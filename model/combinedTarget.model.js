@@ -7,7 +7,7 @@ const CombinedTargetLineSchema = new mongoose.Schema(
     qtyAssign: { type: Number, default: 0 },
     totalPrice: { type: Number, default: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const CombinedTargetSchema = new mongoose.Schema(
@@ -21,7 +21,7 @@ const CombinedTargetSchema = new mongoose.Schema(
     created_by: { type: mongoose.Schema.Types.Mixed },
     database: { type: String },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export default mongoose.model("CombinedTarget", CombinedTargetSchema);
