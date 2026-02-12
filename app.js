@@ -87,6 +87,8 @@ import { increasePercentage } from "./controller/targetCreation.controller.js";
 import customerCheckRouter from "./routes/customerCheck.route.js";
 import deviceRoutes from "./routes/device.routes.js";
 import salesPersonTargetRoutes from "./routes/salesPersonTarget.route.js";
+import hierarchyWiseTargetRoutes from "./routes/hierarchyWiseTargetRoutes.js";
+import companySalesTargetRoutes from "./routes/companySalesTargetRoutes.route.js";
 // import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
 app.use(cors());
@@ -95,11 +97,11 @@ app.use(bodyParser.urlencoded({ limit: "50mb", extended: true }));
 app.use(bodyParser.json({ limit: "50mb" }));
 const publicPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "public"
+  "public",
 );
 const publicPath1 = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "controller"
+  "controller",
 );
 // const __filename = fileURLToPath(import.meta.url);
 // const __dirname = path.dirname(__filename);
@@ -121,6 +123,8 @@ app.use("/role", RoleRouter);
 app.use("/warehouse", WarehouseRouter);
 app.use("/categories", CategoryRouter);
 app.use("/order", OrderRouter);
+app.use("/hierarchy-wise-targets", hierarchyWiseTargetRoutes);
+app.use("/company-sales-targets", companySalesTargetRoutes);
 app.use("/product", ProductsRouter);
 app.use("/unit", UnitRouter);
 app.use("/sales-return", SalesReturnRouter);
