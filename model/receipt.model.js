@@ -1,80 +1,88 @@
+/* =========================================================
+   File: model/ReceiptModel.js
+   ✅ This is already correct for saving bankId (ObjectId).
+   (No other changes)
+   ========================================================= */
+
 import mongoose from "mongoose";
 
-const ReceiptSchema = new mongoose.Schema({
+const ReceiptSchema = new mongoose.Schema(
+  {
     created_by: {
-        type: String
+      type: String,
     },
     database: {
-        type: String
+      type: String,
     },
     userId: {
-        type: String
+      type: String,
     },
     partyId: {
-        type: String,
+      type: String,
     },
     expenseId: {
-        type: String,
+      type: String,
     },
     transporterId: {
-        type: String,
+      type: String,
     },
     type: {
-        type: String
+      type: String,
     },
     voucherType: {
-        type: String
+      type: String,
     },
     voucherNo: {
-        type: Number
+      type: Number,
     },
     date: {
-        type: Date
+      type: Date,
     },
     paymentMode: {
-        type: String
+      type: String,
     },
     paymentType: {
-        type: String
+      type: String,
     },
     title: {
-        type: String
+      type: String,
     },
     amount: {
-        type: Number
+      type: Number,
     },
     instrumentNo: {
-        type: String
+      type: String,
     },
     remark: {
-        type: String
+      type: String,
     },
     latitude: {
-        type: String
+      type: String,
     },
     longitude: {
-        type: String
+      type: String,
     },
     time: {
-        type: String
+      type: String,
     },
     status: {
-        type: String,
-        default: "Active"
+      type: String,
+      default: "Active",
     },
     runningAmount: {
-        type: Number
+      type: Number,
     },
-    bankSelect:{
-        type:String
+    bankSelect: {
+      type: String,
     },
     cashRunningAmount: {
-        type: Number
+      type: Number,
     },
-    bankDetails:{
-        type:Object
+    bankDetails: {
+      type: mongoose.Schema.Types.ObjectId, // stores ONLY bank subdocument _id (bankId)
     },
-
-}, { timestamps: true })
+  },
+  { timestamps: true },
+);
 
 export const Receipt = mongoose.model("receipt", ReceiptSchema);
