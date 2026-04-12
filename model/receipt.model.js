@@ -1,9 +1,3 @@
-/* =========================================================
-   File: model/ReceiptModel.js
-   ✅ This is already correct for saving bankId (ObjectId).
-   (No other changes)
-   ========================================================= */
-
 import mongoose from "mongoose";
 
 const ReceiptSchema = new mongoose.Schema(
@@ -79,7 +73,17 @@ const ReceiptSchema = new mongoose.Schema(
       type: Number,
     },
     bankDetails: {
-      type: mongoose.Schema.Types.ObjectId, // stores ONLY bank subdocument _id (bankId)
+      type: mongoose.Schema.Types.ObjectId,
+    },
+
+    // ✅ NEW FIELDS
+    isCashToBank: {
+      type: Boolean,
+      default: false,
+    },
+    isBankToCash: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true },

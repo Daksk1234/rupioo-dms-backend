@@ -152,7 +152,7 @@ export const DeleteProduct = async (req, res, next) => {
     });
     if (warehouse) {
       warehouse.productItems = warehouse.productItems.filter(
-        (sub) => sub.productId.toString() !== req.params.id
+        (sub) => sub.productId.toString() !== req.params.id,
       );
       await warehouse.save();
     }
@@ -224,7 +224,7 @@ export const UpdateProduct = async (req, res, next) => {
         await addProductInWarehouse(
           req.body,
           req.body.warehouse,
-          existingProduct
+          existingProduct,
         );
       }
       if (req.body.Product_Title && req.body.SubCategory && req.body.category) {
@@ -239,7 +239,7 @@ export const UpdateProduct = async (req, res, next) => {
       const product = await Product.findByIdAndUpdate(
         productId,
         updatedProduct,
-        { new: true }
+        { new: true },
       );
       return res
         .status(200)
@@ -263,7 +263,7 @@ export const StockAlert1 = async (req, res) => {
         continue;
       }
       const productIdsInWarehouse = productItems.map(
-        (product) => product.productId
+        (product) => product.productId,
       );
       if (!productIdsInWarehouse || productIdsInWarehouse.length === 0) {
         continue;
@@ -277,13 +277,13 @@ export const StockAlert1 = async (req, res) => {
       const warehouseAlertProducts = productItems
         .filter((item) => {
           const product = products.find(
-            (p) => p._id.toString() === item.productId.toString()
+            (p) => p._id.toString() === item.productId.toString(),
           );
           return product && item.currentStock < product.MIN_stockalert;
         })
         .map((item) => {
           const product = products.find(
-            (p) => p._id.toString() === item.productId.toString()
+            (p) => p._id.toString() === item.productId.toString(),
           );
           return {
             productId: item.productId,
@@ -378,7 +378,7 @@ export const viewCurrentStock = async (req, res, next) => {
         .json({ message: "warehouse not found", status: false });
     }
     const productItem = warehouse.productItems.find(
-      (item) => item.productId === req.params.productId
+      (item) => item.productId === req.params.productId,
     );
     if (!productItem) {
       return res
@@ -448,9 +448,8 @@ export const saveItemWithExcel = async (req, res) => {
             // let fname = existName[0];
             // const hsn = document.HSN_Code.trim();
             // last4 = hsn.slice(-4);
-            document[
-              "sId"
-            ] = `${document.category}-${document.SubCategory}-${document.Product_Title}`;
+            document["sId"] =
+              `${document.category}-${document.SubCategory}-${document.Product_Title}`;
           }
           if (document.id) {
             const existingId = await Product.findOne({
@@ -499,7 +498,7 @@ export const saveItemWithExcel = async (req, res) => {
               await addProductInWarehouse1(
                 document,
                 insertedDocument.warehouse,
-                insertedDocument
+                insertedDocument,
               );
               insertedDocuments.push(insertedDocument);
             }
@@ -518,11 +517,11 @@ export const saveItemWithExcel = async (req, res) => {
       message = `warehouse not exist: ${existingParts.join(", ")}`;
     } else if (existingIds.length > 0) {
       message = `this product name  id already exist: ${existingIds.join(
-        ", "
+        ", ",
       )}`;
     } else if (IdNotExisting.length > 0) {
       message = `this product name id is required : ${IdNotExisting.join(
-        ", "
+        ", ",
       )}`;
     }
     return res.status(200).json({ message, status: true });
@@ -570,9 +569,8 @@ export const updateItemWithExcel = async (req, res) => {
         // let fname = existName[0];
         // const hsn = document.HSN_Code.trim();
         // last4 = hsn.slice(-4);
-        document[
-          "sId"
-        ] = `${document.category}-${document.SubCategory}-${document.Product_Title}`;
+        document["sId"] =
+          `${document.category}-${document.SubCategory}-${document.Product_Title}`;
       }
       if (document.HSN_Code) {
         const existingWarehouse = await Warehouse.findOne({
@@ -624,7 +622,7 @@ export const updateItemWithExcel = async (req, res) => {
             const insertedDocument = await Product.findOneAndUpdate(
               filter,
               document,
-              options
+              options,
             );
             insertedDocuments.push(insertedDocument);
           }
@@ -657,7 +655,7 @@ export const addProductInWarehouse1 = async (warehouse, warehouseId, id) => {
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId === id._id.toString()
+      (pItem) => pItem.productId === id._id.toString(),
     );
     if (sourceProductItem) {
       sourceProductItem.currentStock = warehouse.qty;
@@ -687,7 +685,7 @@ export const addProductInWarehouse1 = async (warehouse, warehouseId, id) => {
       const updated = await Warehouse.updateOne(
         { _id: warehouseId },
         { $push: { productItems: ware } },
-        { upsert: true }
+        { upsert: true },
       );
     }
   } catch (error) {
@@ -725,7 +723,7 @@ export const addProductInStock = async (warehouse, warehouseId, id) => {
         const updated = await Stock.updateOne(
           { warehouseId: warehouseId },
           { $push: { productItems: productItems } },
-          { upsert: true }
+          { upsert: true },
         );
       } else {
         await Stock.create(warehouses);
@@ -738,7 +736,7 @@ export const addProductInStock = async (warehouse, warehouseId, id) => {
 export const addProductInWarehouse = async (
   warehouse,
   warehouseId,
-  productId
+  productId,
 ) => {
   try {
     const user = await Warehouse.findById({ _id: warehouseId });
@@ -746,7 +744,7 @@ export const addProductInWarehouse = async (
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId.toString() === productId._id.toString()
+      (pItem) => pItem.productId.toString() === productId._id.toString(),
     );
     if (sourceProductItem) {
       sourceProductItem.gstPercentage = parseInt(warehouse.GSTRate);
@@ -775,7 +773,7 @@ export const addProductInWarehouse = async (
 export const addProductInStockUpdated = async (
   warehouse,
   warehouseId,
-  productId
+  productId,
 ) => {
   try {
     const user = await Stock.findOne({ warehouseId: warehouseId });
@@ -783,7 +781,7 @@ export const addProductInStockUpdated = async (
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId.toString() === productId._id.toString()
+      (pItem) => pItem.productId.toString() === productId._id.toString(),
     );
     if (sourceProductItem) {
       sourceProductItem.gstPercentage = parseInt(warehouse.GSTRate);
@@ -806,7 +804,7 @@ export const addProductInStockUpdated = async (
 export const addProductInWarehouse2 = async (
   warehouse,
   warehouseId,
-  orderItem
+  orderItem,
 ) => {
   try {
     const user = await Warehouse.findById({ _id: warehouseId });
@@ -814,7 +812,7 @@ export const addProductInWarehouse2 = async (
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId.toString() === warehouse._id.toString()
+      (pItem) => pItem.productId.toString() === warehouse._id.toString(),
     );
     if (sourceProductItem) {
       sourceProductItem.pQty += orderItem.qty;
@@ -834,7 +832,7 @@ export const addProductInWarehouse2 = async (
       "(orderItem.pTotal/orderItem.pQty)+1",
       orderItem.pTotal / orderItem.pQty,
       orderItem.pTotal,
-      orderItem.pRate
+      orderItem.pRate,
     );
   } catch (error) {
     console.error(error);
@@ -844,7 +842,7 @@ export const addProductInWarehouse4 = async (
   warehouse,
   warehouseId,
   orderItem,
-  date
+  date,
 ) => {
   try {
     const dates = new Date(date);
@@ -856,7 +854,7 @@ export const addProductInWarehouse4 = async (
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId.toString() === warehouse._id.toString()
+      (pItem) => pItem.productId.toString() === warehouse._id.toString(),
     );
     if (sourceProductItem) {
       sourceProductItem.gstPercentage = warehouse.GSTRate;
@@ -875,7 +873,7 @@ export const addProductInWarehouse4 = async (
       return console.log("warehouse not found");
     }
     const existingStock = stock.productItems.find(
-      (item) => item.productId.toString() === warehouse._id.toString()
+      (item) => item.productId.toString() === warehouse._id.toString(),
     );
     if (existingStock) {
       existingStock.pQty += orderItem.qty;
@@ -893,7 +891,7 @@ export const addProductInWarehouse3 = async (
   warehouse,
   warehouseId,
   orderItem,
-  date
+  date,
 ) => {
   try {
     const dates = new Date(date);
@@ -907,7 +905,7 @@ export const addProductInWarehouse3 = async (
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId === warehouse._id.toString()
+      (pItem) => pItem.productId === warehouse._id.toString(),
     );
     if (sourceProductItem) {
       sourceProductItem.gstPercentage = warehouse.GSTRate;
@@ -945,7 +943,7 @@ export const addProductInWarehouse3 = async (
         "pRate i wanting",
         orderItem.pTotal,
         orderItem.pQty,
-        orderItem.pTotal / orderItem.pQty
+        orderItem.pTotal / orderItem.pQty,
       );
       let warehouses = {
         database: warehouse.database,
@@ -963,7 +961,7 @@ export const addProductInWarehouse3 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             existingStock.gstPercentage = warehouse.GSTRate;
@@ -986,7 +984,7 @@ export const addProductInWarehouse3 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             if (item.date.toDateString() === dates.toDateString()) {
@@ -1018,7 +1016,7 @@ export const addProductInWarehouse3 = async (
         });
         if (existProductInStock) {
           const existingProduct = existProductInStock.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (!existingProduct) {
             console.log("existingProduct2", orderItem);
@@ -1055,7 +1053,7 @@ export const addProductInWarehouse5 = async (
   warehouse,
   warehouseId,
   orderItem,
-  date
+  date,
 ) => {
   try {
     console.log("warehousee", warehouse);
@@ -1070,7 +1068,7 @@ export const addProductInWarehouse5 = async (
       return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId.toString() === warehouse._id.toString()
+      (pItem) => pItem.productId.toString() === warehouse._id.toString(),
     );
     console.log("sourceProductItem", sourceProductItem);
     console.log("orderItem", orderItem);
@@ -1122,7 +1120,7 @@ export const addProductInWarehouse5 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             existingStock.gstPercentage = warehouse.GSTRate;
@@ -1146,7 +1144,7 @@ export const addProductInWarehouse5 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           console.log("existingStockss", existingStock);
           if (existingStock) {
@@ -1179,7 +1177,7 @@ export const addProductInWarehouse5 = async (
         if (existProductInStock) {
           console.log("existProductInStock", existProductInStock);
           const existingProduct = existProductInStock.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           console.log("exisyingProduct", existingProduct);
           if (!existingProduct) {
@@ -1207,7 +1205,7 @@ export const addProductInWarehouse5 = async (
             console.log("orderItem.price", orderItem.price);
             console.log(
               "(warehouse.qty * orderItem.price)",
-              warehouse.qty * orderItem.price
+              warehouse.qty * orderItem.price,
             );
             existProductInStock.productItems.push(productItems);
             await existProductInStock.save();
@@ -1223,7 +1221,7 @@ export const addProductInWarehouse6 = async (
   warehouse,
   warehouseId,
   orderItem,
-  date
+  date,
 ) => {
   try {
     const dates = new Date(date);
@@ -1270,7 +1268,7 @@ export const addProductInWarehouse6 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             existingStock.gstPercentage = warehouse.GSTRate;
@@ -1293,7 +1291,7 @@ export const addProductInWarehouse6 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             if (item.date.toDateString() === dates.toDateString()) {
@@ -1322,7 +1320,7 @@ export const addProductInWarehouse6 = async (
         });
         if (existProductInStock) {
           const existingProduct = existProductInStock.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (!existingProduct) {
             let productItems = {
@@ -1354,7 +1352,7 @@ export const addProductInWarehouse7 = async (
   warehouseId,
   orderItem,
   date,
-  orderDate
+  orderDate,
 ) => {
   try {
     const dates = new Date(date);
@@ -1398,7 +1396,7 @@ export const addProductInWarehouse7 = async (
       await Stock.create(warehouses);
     } else {
       const existingStock = stock.productItems.find(
-        (item) => item.productId.toString() === warehouse._id.toString()
+        (item) => item.productId.toString() === warehouse._id.toString(),
       );
       if (existingStock) {
         if (existingStock.date.toDateString() === dates.toDateString()) {
@@ -1441,7 +1439,7 @@ export const addProductInWarehouse8 = async (
   warehouse,
   warehouseId,
   orderItem,
-  date
+  date,
 ) => {
   try {
     const dates = new Date(date);
@@ -1459,7 +1457,7 @@ export const addProductInWarehouse8 = async (
     });
     if (stock) {
       const existingStock = stock.productItems.find(
-        (item) => item.productId.toString() === warehouse._id.toString()
+        (item) => item.productId.toString() === warehouse._id.toString(),
       );
       if (existingStock) {
         existingStock.pendingStock -= orderItem.qty;
@@ -1477,7 +1475,7 @@ export const addProductInWarehouse9 = async (
   warehouse,
   warehouseId,
   orderItem,
-  date1
+  date1,
 ) => {
   try {
     const datess = new Date(date1);
@@ -1529,7 +1527,7 @@ export const addProductInWarehouse9 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             existingStock.gstPercentage = warehouse.GSTRate;
@@ -1546,7 +1544,7 @@ export const addProductInWarehouse9 = async (
           });
           if (stock1) {
             const existingStock1 = stock.productItems.find(
-              (item) => item.productId.toString() === warehouse._id.toString()
+              (item) => item.productId.toString() === warehouse._id.toString(),
             );
             if (existingStock1) {
               existingStock.pendingStock -= orderItem.qty;
@@ -1569,7 +1567,7 @@ export const addProductInWarehouse9 = async (
       } else {
         for (let item of stock) {
           const existingStock = item.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (existingStock) {
             if (item.date.toDateString() === dates.toDateString()) {
@@ -1596,7 +1594,7 @@ export const addProductInWarehouse9 = async (
           });
           if (stock1) {
             const existingStock1 = stock1.productItems.find(
-              (item) => item.productId.toString() === warehouse._id.toString()
+              (item) => item.productId.toString() === warehouse._id.toString(),
             );
             if (existingStock1) {
               existingStock.pendingStock -= orderItem.qty;
@@ -1613,7 +1611,7 @@ export const addProductInWarehouse9 = async (
         });
         if (existProductInStock) {
           const existingProduct = existProductInStock.productItems.find(
-            (item) => item.productId.toString() === warehouse._id.toString()
+            (item) => item.productId.toString() === warehouse._id.toString(),
           );
           if (!existingProduct) {
             let productItems = {
@@ -1786,13 +1784,7 @@ export const UpdateProductSalesRateMultiple = async (req, res, next) => {
       .json({ error: "Internal Server Error", status: false });
   }
 };
-// Make sure Product is imported at the top of the file
-// import Product from "../model/product.model.js";
 
-/**
- * Decide which hex color to use for a given profit percentage,
- * based ONLY on the 4 colors sent by the frontend.
- */
 const getProfitColorFromPercentage = (profitPercentage, colorConfig = {}) => {
   const p = Number(profitPercentage) || 0;
   const { green, orange, blue, red } = colorConfig;
@@ -1806,23 +1798,6 @@ const getProfitColorFromPercentage = (profitPercentage, colorConfig = {}) => {
   return red; // 0 – 4.99% (and below)
 };
 
-/**
- * POST /product/update-profit-colors/:database
- * Body:
- * {
- *   greenColor: "#....",
- *   orangeColor: "#....",
- *   blueColor: "#....",
- *   redColor: "#....",
- *   productIds?: [optional array of product _id]
- * }
- *
- * Saves ONE field on each product: profitColorCode (String)
- * based on its margin = (SalesRate - LandedCost) / LandedCost * 100
- */
-// Make sure Product is imported at the top
-// import Product from "../model/product.model.js";
-
 export const UpdateProductProfitColors = async (req, res) => {
   try {
     const { database } = req.params || {};
@@ -1834,7 +1809,6 @@ export const UpdateProductProfitColors = async (req, res) => {
         .json({ status: false, message: "Database is required" });
     }
 
-    // ✅ We now expect: { productColors: [ { id, color }, ... ] }
     if (!Array.isArray(productColors) || productColors.length === 0) {
       return res.status(400).json({
         status: false,
@@ -1844,16 +1818,25 @@ export const UpdateProductProfitColors = async (req, res) => {
 
     const bulkOps = productColors
       .filter((pc) => pc?.id && pc?.color)
-      .map((pc) => ({
-        updateOne: {
-          filter: { _id: pc.id, database }, // keep it safe per database
-          update: {
-            $set: {
-              profitColorCode: pc.color, // 👈 only ONE field saved
+      .map((pc) => {
+        const parsedProfit = Number(
+          String(pc?.ProfitPercentage ?? 0).replace(/[^\d.-]/g, ""),
+        );
+
+        return {
+          updateOne: {
+            filter: { _id: pc.id, database },
+            update: {
+              $set: {
+                profitColorCode: pc.color,
+                ProfitPercentage: Number.isFinite(parsedProfit)
+                  ? Number(parsedProfit.toFixed(2))
+                  : 0,
+              },
             },
           },
-        },
-      }));
+        };
+      });
 
     if (!bulkOps.length) {
       return res
@@ -1861,12 +1844,14 @@ export const UpdateProductProfitColors = async (req, res) => {
         .json({ status: false, message: "Nothing to update" });
     }
 
-    await Product.bulkWrite(bulkOps);
+    const result = await Product.bulkWrite(bulkOps);
 
     return res.status(200).json({
       status: true,
-      message: "Product color codes updated successfully",
+      message:
+        "Product color codes and profit percentages updated successfully",
       updatedCount: bulkOps.length,
+      result,
     });
   } catch (err) {
     console.error(err);

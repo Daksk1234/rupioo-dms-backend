@@ -6,6 +6,8 @@ import {
   updatePincode,
   viewPincode,
   viewPincodes,
+  viewPincodeByState,
+  getAllStates,
 } from "../controller/pincode.controller.js";
 const router = express.Router();
 import multer from "multer";
@@ -13,6 +15,8 @@ const uploads = multer({ dest: "public/ExcelFile/" });
 
 router.post("/save-pincode-excel", uploads.single("file"), saveExcelPincode);
 router.get("/view-pincode-list", viewPincode);
+router.get("/by-state", viewPincodeByState);
+router.get("/states", getAllStates);
 router.get("/view-pincodelist", viewPincodes);
 router.put("/update-pincode/:id", updatePincode);
 router.delete("/delete-pincode/:id", deletePindcode);

@@ -91,6 +91,74 @@ export const viewPincodes = async (req, res) => {
   }
 };
 
+export const getAllStates = async (req, res) => {
+  try {
+    // distinct gives unique values
+    let states = await Pincode.distinct("state");
+
+    // cleanup: remove empty/null, trim, unique after trim, sort
+    states = (states || [])
+      .map((s) => (s || "").toString().trim())
+      .filter(Boolean);
+
+    // ensure unique after trim + sort A-Z
+    states = Array.from(new Set(states)).sort((a, b) => a.localeCompare(b));
+
+    return res.status(200).json({
+      message: "Data Found",
+      status: true,
+      totalRecords: states.length,
+      states,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+      status: false,
+    });
+  }
+};
+
+export const viewPincodeByState = async (req, res) => {
+  try {
+    const state = (req.query.state || "").trim();
+
+    if (!state) {
+      return res.status(400).json({
+        message: "state is required",
+        status: false,
+      });
+    }
+
+    // exact state match (case-insensitive)
+    const query = { state: { $regex: `^${state}$`, $options: "i" } };
+
+    const pinDocs = await Pincode.find(query)
+      .select("pincode city district state")
+      .sort({ pincode: 1 })
+      .lean();
+
+    const pincodes = pinDocs.map((x) => x?.pincode).filter(Boolean);
+
+    return res.status(200).json({
+      message: "Data Found",
+      status: true,
+      state,
+      totalRecords: pinDocs.length,
+      pincodes, // ✅ only pincodes array
+      pinCodeList: pinDocs, // ✅ optional full list (remove if you want only pincodes)
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+      status: false,
+    });
+  }
+};
+
 export const viewPincode = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -141,7 +209,7 @@ export const updatePincode = async (req, res, next) => {
     const updatedPincode = await Pincode.findByIdAndUpdate(
       id,
       { pincode },
-      { new: true }
+      { new: true },
     );
     return updatedPincode
       ? res

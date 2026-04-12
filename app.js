@@ -89,6 +89,7 @@ import deviceRoutes from "./routes/device.routes.js";
 import salesPersonTargetRoutes from "./routes/salesPersonTarget.route.js";
 import hierarchyWiseTargetRoutes from "./routes/hierarchyWiseTargetRoutes.js";
 import companySalesTargetRoutes from "./routes/companySalesTargetRoutes.route.js";
+import companyTargetRoutes from "./routes/companyTarget.route.js";
 // import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
 app.use(cors());
@@ -198,6 +199,7 @@ app.use(activityLogger());
 app.use("/activity-logs", activityLoggerRoute);
 app.use("/devices", deviceRoutes);
 app.use("/salesperson-target", salesPersonTargetRoutes);
+app.use("/target", companyTargetRoutes);
 mongoose
   .connect(process.env.DATABASE_URL, {
     useUnifiedTopology: true,

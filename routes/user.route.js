@@ -36,6 +36,8 @@ import {
   verifyPanNo,
   viewApplyRules,
   viewApplyRulesById,
+  ViewUserByPanNumber,
+  ViewCashUserByDatabase,
 } from "../controller/user.controller.js";
 import { verifyDeviceForLogin } from "../middleware/deviceAuth.js";
 
@@ -59,14 +61,16 @@ router.put("/update-plan/:id", updatePlan);
 router.post(
   "/import-user-data/:database",
   uploads.single("file"),
-  saveUserWithExcel
+  saveUserWithExcel,
 );
 router.post(
   "/update-import-user/:database",
   uploads.single("file"),
-  updateUserWithExcel
+  updateUserWithExcel,
 );
 
+router.get("/view-cash-user/:database", ViewCashUserByDatabase);
+router.get("/view-user-by-pan/:panNumber/:database", ViewUserByPanNumber);
 router.put("/update-super-admin-role/:id", SuperAdminRoleUpdate);
 router.post("/save-user", upload.single("file"), SaveUser);
 router.get("/view-register-user/:database", ViewRegisterUser);

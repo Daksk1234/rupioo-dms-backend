@@ -33,7 +33,7 @@ const mergeGroupPermissions = (groups = []) => {
       if (!key) continue;
       const set = new Set(map.get(key) || []);
       (Array.isArray(row?.permission) ? row.permission : []).forEach((p) =>
-        set.add(p)
+        set.add(p),
       );
       map.set(key, Array.from(set));
     }
@@ -87,7 +87,7 @@ const reverseGeocodeOpenCage = async (latitude, longitude) => {
           no_annotations: 1,
         },
         timeout: 4000,
-      }
+      },
     );
 
     const results = resp?.data?.results;
@@ -372,7 +372,7 @@ export const SaveUser = async (req, res, next) => {
         const date = new Date();
         req.body.planStart = date;
         req.body.planEnd = new Date(
-          date.getTime() + sub.days * 24 * 60 * 60 * 1000
+          date.getTime() + sub.days * 24 * 60 * 60 * 1000,
         );
         req.body.billAmount = sub.subscriptionCost;
         req.body.userAllotted = sub.noOfUser;
@@ -447,7 +447,7 @@ export const SaveUser = async (req, res, next) => {
             ...new Set(
               user.service
                 .map((area) => area.pincode)
-                .filter((pincode) => pincode !== undefined && pincode !== null)
+                .filter((pincode) => pincode !== undefined && pincode !== null),
             ),
           ];
 
@@ -463,7 +463,7 @@ export const SaveUser = async (req, res, next) => {
                 ],
                 pincode: { $in: chunk },
               },
-              { $set: { created_by: user._id } }
+              { $set: { created_by: user._id } },
             );
           }
         }
@@ -541,6 +541,99 @@ export const ViewUserById = async (req, res, next) => {
   }
 };
 
+export const ViewCashUserByDatabase = async (req, res, next) => {
+  try {
+    const { database } = req.params;
+
+    if (!database) {
+      return res.status(400).json({
+        status: false,
+        error: "database is required",
+      });
+    }
+
+    // const normalizedPan = panNumber.trim().toUpperCase();
+
+    const user = await User.findOne({
+      id: "CASH ACCOUNT-Cash-in-Hand",
+      account: "Cash-in-Hand",
+      database: req.params.database,
+      status: "Active",
+    })
+      .populate({ path: "subscriptionPlan", model: "subscription" })
+      .populate({ path: "created_by", model: "user" })
+      .populate({ path: "rolename", model: "role" })
+      .populate({ path: "branch", model: "userBranch" })
+      .populate({ path: "shift", model: "WorkingHour" })
+      .populate({ path: "warehouse.id", model: "warehouse" });
+
+    if (!user) {
+      return res.status(404).json({
+        status: false,
+        message: "User not found",
+        User: null,
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      User: user,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      status: false,
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const ViewUserByPanNumber = async (req, res, next) => {
+  try {
+    const { panNumber, database } = req.params;
+
+    if (!panNumber && !database) {
+      return res.status(400).json({
+        status: false,
+        error: "all fields are required",
+      });
+    }
+
+    const normalizedPan = panNumber.trim().toUpperCase();
+
+    const user = await User.findOne({
+      Pan_No: normalizedPan,
+      database: database,
+      status: "Active",
+    })
+      .populate({ path: "subscriptionPlan", model: "subscription" })
+      .populate({ path: "created_by", model: "user" })
+      .populate({ path: "rolename", model: "role" })
+      .populate({ path: "branch", model: "userBranch" })
+      .populate({ path: "shift", model: "WorkingHour" })
+      .populate({ path: "warehouse.id", model: "warehouse" });
+
+    if (!user) {
+      return res.status(404).json({
+        status: false,
+        message: "User not found",
+        User: null,
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      User: user,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      status: false,
+      error: "Internal Server Error",
+    });
+  }
+};
+
 export const ViewUser = async (req, res, next) => {
   try {
     const userId = req.params.id;
@@ -569,7 +662,7 @@ export const DeleteUser = async (req, res, next) => {
     if (user?.rolename?.roleName === "Sales Person") {
       await Customer.updateMany(
         { created_by: user._id },
-        { $unset: { created_by: "" } }
+        { $unset: { created_by: "" } },
       );
     }
     user.status = "Deactive";
@@ -736,13 +829,12 @@ export const SignIn = async (req, res, next) => {
       // update last known location (optional)
       await User.updateOne(
         { email },
-        { $set: { latitude, longitude, currentAddress } }
+        { $set: { latitude, longitude, currentAddress } },
       );
 
       // Compute permissions ONLY for SuperAdmin here
-      const allowedPermission = await buildAllowedPermissionForUser(
-        existingAccount
-      );
+      const allowedPermission =
+        await buildAllowedPermissionForUser(existingAccount);
 
       // NEW: activity log (Super Admin / MASTER on successful login)
       await logLoginIfPrivileged(req, existingAccount, { latitude, longitude });
@@ -758,7 +850,9 @@ export const SignIn = async (req, res, next) => {
     if (existingCustomer) {
       await Customer.updateOne(
         { email },
-        { $set: { latitude, longitude, currentAddress, loginDate: new Date() } }
+        {
+          $set: { latitude, longitude, currentAddress, loginDate: new Date() },
+        },
       );
       return res.json({
         message: "Login successful",
@@ -979,11 +1073,11 @@ export const updatePassword = async (request, response, next) => {
     } else {
       const userUpdate = await User.updateOne(
         { _id: userId },
-        { password: request.body.password }
+        { password: request.body.password },
       );
       const customerUpdate = await Customer.updateOne(
         { _id: userId },
-        { password: request.body.password }
+        { password: request.body.password },
       );
       if (
         (userUpdate && userUpdate.modifiedCount > 0) ||
@@ -1177,7 +1271,7 @@ export const saveUserWithExcel = async (req, res) => {
     }
     if (planLimit.length > 0) {
       message = `You may have reached your plan's user limit or may not be subscribed to a plan : ${planLimit.join(
-        ", "
+        ", ",
       )}`;
     }
     return res.status(200).json({ message, status: true });
@@ -1283,7 +1377,7 @@ export const updateUserWithExcel = async (req, res) => {
               const insertedDocument = await User.findOneAndUpdate(
                 filter,
                 document,
-                options
+                options,
               );
               insertedDocuments.push(insertedDocument);
             }
@@ -1448,7 +1542,7 @@ export const deleteAssignUser = async (req, res, next) => {
 };
 export const assingWarehouse = async function assingWarehouse(
   warehouse,
-  userId
+  userId,
 ) {
   try {
     for (let id of warehouse) {
@@ -1484,7 +1578,7 @@ export const GetExcelKeys = async (req, res) => {
     "status",
   ];
   const modelKeys = Object.keys(User.schema.paths).filter(
-    (key) => !excludedKeys.includes(key)
+    (key) => !excludedKeys.includes(key),
   );
   return res.status(200).json({ keys: modelKeys, status: true });
 };
@@ -1731,9 +1825,8 @@ export const SignInWithAdmin = async (req, res, next) => {
       const token = Jwt.sign({ subject: email }, process.env.TOKEN_SECRET_KEY);
 
       // NEW: attach merged permissions from groups
-      const allowedPermission = await loadallowedPermissionForUser(
-        existingAccount
-      );
+      const allowedPermission =
+        await loadallowedPermissionForUser(existingAccount);
 
       return res.json({
         message: "Login successful",
@@ -1752,9 +1845,8 @@ export const SignInWithAdmin = async (req, res, next) => {
       await existingAccount.save();
 
       // NEW: attach merged permissions from groups
-      const allowedPermission = await loadallowedPermissionForUser(
-        existingAccount
-      );
+      const allowedPermission =
+        await loadallowedPermissionForUser(existingAccount);
 
       return res.json({
         message: "Login successful",
@@ -1821,11 +1913,11 @@ export const updatePlan = async (req, res, next) => {
         const date = new Date();
         const differenceInTime = date.getTime() - previousDate.getTime();
         const differenceInDays = Math.floor(
-          differenceInTime / (1000 * 3600 * 24)
+          differenceInTime / (1000 * 3600 * 24),
         );
         user.planStart = date;
         user.planEnd = new Date(
-          date.getTime() + sub.days * 24 * 60 * 60 * 1000
+          date.getTime() + sub.days * 24 * 60 * 60 * 1000,
         );
         user.billAmount =
           sub.subscriptionCost - differenceInDays * perDayAmount;
