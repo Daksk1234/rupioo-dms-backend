@@ -9,6 +9,7 @@ import { User } from "../model/user.model.js";
 import { Product } from "../model/product.model.js";
 import { CreateOrder } from "../model/createOrder.model.js";
 import { generateInvoice, generateOrderNo } from "../service/invoice.js";
+import QRCode from "qrcode";
 import {
   getCreateOrderHierarchy,
   getUserHierarchyBottomToTop,
@@ -32,6 +33,7 @@ import { CompanyDetails } from "../model/companyDetails.model.js";
 import nodemailer from "nodemailer";
 import { Role } from "../model/role.model.js";
 import { PurchaseOrder } from "../model/purchaseOrder.model.js";
+import { PaymentQr } from "../model/paymentQrModel.js";
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -92,7 +94,7 @@ export const createOrder = async (req, res, next) => {
         if (warehouse) {
           const pro = warehouse.productItems.find(
             (item) =>
-              item.productId.toString() === orderItem.productId.toString()
+              item.productId.toString() === orderItem.productId.toString(),
           );
 
           if (pro.currentStock < orderItem.qty) {
@@ -110,7 +112,7 @@ export const createOrder = async (req, res, next) => {
             product,
             product.warehouse,
             orderItem,
-            req.body.date
+            req.body.date,
           );
           await warehouse.save(); // Save warehouse changes
           await product.save(); // Save product changes
@@ -152,10 +154,19 @@ export const createOrder = async (req, res, next) => {
 export const createOrderWithInvoice = async (req, res, next) => {
   try {
     console.log("req.body", req.body);
+
     const orderItems = req.body.orderItems;
     const date1 = new Date();
     const date2 = new Date(req.body.date);
+
     const party = await Customer.findById({ _id: req.body.partyId });
+    if (!party) {
+      return res.status(404).json({
+        message: "Customer not found",
+        status: false,
+      });
+    }
+
     const user = await User.findOne({ _id: party.created_by });
     if (!user) {
       return res.status(401).json({ message: "No user found", status: false });
@@ -168,7 +179,7 @@ export const createOrderWithInvoice = async (req, res, next) => {
             if (warehouse) {
               const pro = warehouse.productItems.find(
                 (item) =>
-                  item.productId.toString() === orderItem.productId.toString()
+                  item.productId.toString() === orderItem.productId.toString(),
               );
               // pro.currentStock -= (orderItem.qty);
               product.qty -= orderItem.qty;
@@ -178,23 +189,66 @@ export const createOrderWithInvoice = async (req, res, next) => {
                 product,
                 product.warehouse,
                 orderItem,
-                req.body.date
+                req.body.date,
               );
             }
           } else {
             console.error(`Product with ID ${orderItem.productId} not found`);
           }
         }
+
         req.body.status = "completed";
         req.body.userId = party.created_by;
         req.body.database = user.database;
-        // console.log("party after",party.remainingLimit)
-        // console.log("req.body.grandTotal",req.body.grandTotal)
+
         party.remainingLimit -= req.body.grandTotal;
         await party.save();
-        // console.log("party before",party.remainingLimit)
 
-        const savedOrder = await CreateOrder.create(req.body);
+        // ===== Extra fields added from previous API =====
+        const upiId = req.body.upiId;
+        const merchantName = req.body.merchantName;
+
+        const amount = req.body.grandTotal;
+        const orderNo =
+          req.body.orderNo || req.body.invoiceId || `INV${Date.now()}`;
+        const partyName = party.CompanyName;
+
+        const invoiceDate = new Date(req.body.date).toISOString().split("T")[0];
+        const invoiceTime = new Date().toLocaleTimeString();
+
+        const note = `Party:${partyName},Invoice:${orderNo},Date:${invoiceDate},Time:${invoiceTime},Amount:${amount}`;
+
+        const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${encodeURIComponent(
+          note,
+        )}`;
+
+        const qrFolder = path.join(process.cwd(), "public/Images");
+
+        if (!fs.existsSync(qrFolder)) {
+          fs.mkdirSync(qrFolder, { recursive: true });
+        }
+
+        const qrFileName = `invoice-${orderNo}.png`;
+        const qrPath = path.join(qrFolder, qrFileName);
+
+        await QRCode.toFile(qrPath, upiLink);
+
+        req.body.upiId = upiId;
+        req.body.merchantName = merchantName;
+        req.body.upiLink = upiLink;
+        req.body.qrCode = qrFileName;
+        req.body.Time = invoiceTime;
+        req.body.Date = invoiceDate;
+        req.body.paidAmount = 0;
+        req.body.paidAmounts = amount;
+        req.body.paymentVerified = false;
+        // ===== Extra fields end =====
+
+        const [qrData, savedOrder] = await Promise.all([
+          PaymentQr.create(req.body),
+          CreateOrder.create(req.body),
+        ]);
+
         if (savedOrder) {
           const particular = "SalesInvoice";
           await ledgerPartyForDebit(savedOrder, particular);
@@ -208,7 +262,7 @@ export const createOrderWithInvoice = async (req, res, next) => {
             if (warehouse) {
               const pro = warehouse.productItems.find(
                 (item) =>
-                  item.productId.toString() === orderItem.productId.toString()
+                  item.productId.toString() === orderItem.productId.toString(),
               );
               product.qty -= orderItem.qty;
               await warehouse.save();
@@ -217,20 +271,67 @@ export const createOrderWithInvoice = async (req, res, next) => {
                 product,
                 product.warehouse,
                 orderItem,
-                req.body.date
+                req.body.date,
               );
             }
           } else {
             console.error(`Product with ID ${orderItem.productId} not found`);
           }
         }
+
         req.body.status = "completed";
         req.body.userId = party.created_by;
         req.body.database = user.database;
         req.body.paymentStatus = true;
+
         party.remainingLimit -= req.body.grandTotal;
         await party.save();
-        const savedOrder = await CreateOrder.create(req.body);
+
+        // ===== Extra fields added from previous API =====
+        const upiId = req.body.upiId;
+        const merchantName = req.body.merchantName;
+
+        const amount = req.body.grandTotal;
+        const orderNo =
+          req.body.orderNo || req.body.invoiceId || `INV${Date.now()}`;
+        const partyName = party.CompanyName;
+
+        const invoiceDate = new Date(req.body.date).toISOString().split("T")[0];
+        const invoiceTime = new Date().toLocaleTimeString();
+
+        const note = `Party:${partyName},Invoice:${orderNo},Date:${invoiceDate},Time:${invoiceTime},Amount:${amount}`;
+
+        const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${encodeURIComponent(
+          note,
+        )}`;
+
+        const qrFolder = path.join(process.cwd(), "public/Images");
+
+        if (!fs.existsSync(qrFolder)) {
+          fs.mkdirSync(qrFolder, { recursive: true });
+        }
+
+        const qrFileName = `invoice-${orderNo}.png`;
+        const qrPath = path.join(qrFolder, qrFileName);
+
+        await QRCode.toFile(qrPath, upiLink);
+
+        req.body.upiId = upiId;
+        req.body.merchantName = merchantName;
+        req.body.upiLink = upiLink;
+        req.body.qrCode = qrFileName;
+        req.body.Time = invoiceTime;
+        req.body.Date = invoiceDate;
+        req.body.paidAmount = 0;
+        req.body.paidAmounts = amount;
+        req.body.paymentVerified = false;
+        // ===== Extra fields end =====
+
+        const [qrData, savedOrder] = await Promise.all([
+          PaymentQr.create(req.body),
+          CreateOrder.create(req.body),
+        ]);
+
         if (savedOrder) {
           const particular = "SalesInvoice";
           await ledgerPartyForDebit(savedOrder, particular);
@@ -333,7 +434,7 @@ export const deleteSalesOrder = async (req, res, next) => {
         const warehouse = await Warehouse.findById(product.warehouse);
         if (warehouse) {
           const pro = warehouse.productItems.find(
-            (item) => item.productId === orderItem.productId.toString()
+            (item) => item.productId === orderItem.productId.toString(),
           );
           if (pro) {
             pro.currentStock += orderItem.qty;
@@ -343,7 +444,7 @@ export const deleteSalesOrder = async (req, res, next) => {
               product,
               product.warehouse,
               orderItem,
-              order.date
+              order.date,
             );
             await warehouse.save();
             await product.save();
@@ -422,7 +523,7 @@ export const OrdertoBilling = async (req, res) => {
         if (warehouse) {
           const pro = warehouse.productItems.find(
             (item) =>
-              item.productId.toString() === orderItem.productId.toString()
+              item.productId.toString() === orderItem.productId.toString(),
           );
           pro.currentStock -= orderItem.qty;
           // product.qty -= orderItem.qty;
@@ -465,8 +566,8 @@ export const OrdertoDispatch = async (req, res) => {
       v && typeof v === "object" && v._id
         ? String(v._id)
         : v != null
-        ? String(v)
-        : "";
+          ? String(v)
+          : "";
 
     const order = await CreateOrder.findById({ _id: orderId });
     if (!order) {
@@ -505,7 +606,7 @@ export const OrdertoDispatch = async (req, res) => {
 
     // If all lines are dispatched, order is Dispatch, else Billing
     const allDispatched = order.orderItems.every(
-      (it) => String(it?.status || "").toLowerCase() === "dispatch"
+      (it) => String(it?.status || "").toLowerCase() === "dispatch",
     );
     order.status = allDispatched ? "Dispatch" : "Billing";
 
@@ -709,13 +810,13 @@ export const updateCreateOrder = async (req, res) => {
     const newMap = new Map(newItems.map((item) => [sid(item.productId), item]));
 
     const removedItems = oldItems.filter(
-      (item) => !newMap.has(sid(item.productId))
+      (item) => !newMap.has(sid(item.productId)),
     );
     const addedItems = newItems.filter(
-      (item) => !oldMap.has(sid(item.productId))
+      (item) => !oldMap.has(sid(item.productId)),
     );
     const updatedItems = newItems.filter((item) =>
-      oldMap.has(sid(item.productId))
+      oldMap.has(sid(item.productId)),
     );
 
     const isCompleted = order.status === "completed";
@@ -735,7 +836,7 @@ export const updateCreateOrder = async (req, res) => {
         product.qty += num(oldItem.qty);
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (whItem) {
             whItem.currentStock += num(oldItem.qty);
@@ -745,7 +846,7 @@ export const updateCreateOrder = async (req, res) => {
         }
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (sItem) {
             sItem.currentStock += num(oldItem.qty);
@@ -759,7 +860,7 @@ export const updateCreateOrder = async (req, res) => {
         product.pendingQty -= num(oldItem.qty);
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (whItem) {
             whItem.currentStock += num(oldItem.qty);
@@ -768,7 +869,7 @@ export const updateCreateOrder = async (req, res) => {
         }
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (sItem) {
             sItem.pendingStock -= num(oldItem.qty);
@@ -798,7 +899,7 @@ export const updateCreateOrder = async (req, res) => {
         product.qty -= num(newItem.qty);
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (whItem) {
             whItem.currentStock -= num(newItem.qty);
@@ -809,7 +910,7 @@ export const updateCreateOrder = async (req, res) => {
         }
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (sItem) {
             sItem.currentStock -= num(newItem.qty);
@@ -823,7 +924,7 @@ export const updateCreateOrder = async (req, res) => {
         product.pendingQty += num(newItem.qty);
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (whItem) {
             whItem.currentStock -= num(newItem.qty);
@@ -832,7 +933,7 @@ export const updateCreateOrder = async (req, res) => {
         }
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (sItem) {
             sItem.pendingStock += num(newItem.qty);
@@ -868,7 +969,7 @@ export const updateCreateOrder = async (req, res) => {
         product.qty -= qtyChange;
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (whItem) {
             whItem.currentStock -= qtyChange;
@@ -878,7 +979,7 @@ export const updateCreateOrder = async (req, res) => {
         }
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (sItem) {
             sItem.currentStock -= qtyChange;
@@ -892,7 +993,7 @@ export const updateCreateOrder = async (req, res) => {
         product.pendingQty += qtyChange;
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (whItem) {
             whItem.currentStock -= qtyChange;
@@ -901,7 +1002,7 @@ export const updateCreateOrder = async (req, res) => {
         }
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => sid(p.productId) === pid
+            (p) => sid(p.productId) === pid,
           );
           if (sItem) {
             sItem.currentStock -= qtyChange;
@@ -990,6 +1091,52 @@ export const createOrderHistory = async (req, res, next) => {
       .json({ error: "Internal Server Error", status: false });
   }
 };
+
+export const createOrderGstBuckets = async (req, res, next) => {
+  try {
+    const userId = req.params.id;
+    const orderHistory = await getCreateOrderHierarchy(userId);
+
+    if (!orderHistory || orderHistory.length === 0) {
+      return res.status(400).json({
+        message: "Not Found",
+        status: false,
+      });
+    }
+
+    const b2bData = [];
+    const b2csData = [];
+    const b2clData = [];
+
+    for (const invoice of orderHistory) {
+      const registrationType = invoice?.partyId?.registrationType;
+      const grandTotal = Number(invoice?.grandTotal || 0);
+
+      if (registrationType === "Regular") {
+        b2bData.push(invoice);
+      } else if (registrationType === "UnRegister") {
+        if (grandTotal < 50000) {
+          b2csData.push(invoice);
+        } else if (grandTotal > 50000) {
+          b2clData.push(invoice);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      status: true,
+      b2bData,
+      b2csData,
+      b2clData,
+    });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({
+      error: "Internal Server Error",
+      status: false,
+    });
+  }
+};
 export const updateCreateOrderStatus = async (req, res) => {
   try {
     const orderId = req.params.id;
@@ -1040,7 +1187,7 @@ export const updateCreateOrderStatus = async (req, res) => {
           fs.unlinkSync(pdfFilePath);
           res.send("Mail has been sent to your email. Check your mail");
         }
-      }
+      },
     );
     return res.status(200).json({ Order: order, status: true });
   } catch (error) {
@@ -1140,7 +1287,7 @@ export const ViewOrderHistoryForPartySalesPerson = async (req, res, next) => {
             o?.db ||
             o?.userId?.database ||
             o?.partyId?.database ||
-            ""
+            "",
         )
           .trim()
           .toLowerCase();
@@ -1240,7 +1387,7 @@ export const SalesOrderCalculate111 = async (req, res, next) => {
       salesOrders.lastMonthAmount += item.grandTotal;
     }
     salesOrders.averageAmount = (salesOrders.totalAmount / lastMonth).toFixed(
-      2
+      2,
     );
     res.status(200).json({ salesOrders, status: true });
   } catch (err) {
@@ -1303,12 +1450,12 @@ export const SalesOrderCalculate = async (req, res, next) => {
     } else if (roleName === "Sales Person") {
       // Match orders by userId
       filteredOrders = allOrders.filter(
-        (order) => order.userId?.toString() === existingUser._id.toString()
+        (order) => order.userId?.toString() === existingUser._id.toString(),
       );
     } else if (roleName === "Customer") {
       // Match orders by partyId
       filteredOrders = allOrders.filter(
-        (order) => order.partyId?.toString() === existingUser._id.toString()
+        (order) => order.partyId?.toString() === existingUser._id.toString(),
       );
     } else {
       return res
@@ -1352,7 +1499,7 @@ export const SalesOrderCalculate = async (req, res, next) => {
     // Avoid division by zero
     const totalMonths = distinctMonths.size || 1;
     salesOrders.averageAmount = (salesOrders.totalAmount / totalMonths).toFixed(
-      2
+      2,
     );
 
     return res
@@ -1403,16 +1550,16 @@ export const DebitorCalculate = async (req, res, next) => {
       ]);
     Debtor.totalDue = salesOrder.reduce(
       (sum, item) => sum + item.grandTotal,
-      0
+      0,
     );
     let currentSales = salesOrderCurrentMonth.reduce(
       (sum, item) => sum + item.grandTotal,
-      0
+      0,
     );
     Debtor.totalReceipt = receipt.reduce((sum, item) => sum + item.amount, 0);
     Debtor.currentReceipt = receipts.reduce(
       (sum, item) => sum + item.amount,
-      0
+      0,
     );
 
     res.status(200).json({ Debtor, status: true });
@@ -1437,7 +1584,7 @@ export const deletedSalesOrder = async (req, res, next) => {
         const warehouse = await Warehouse.findById(product.warehouse);
         if (warehouse) {
           const pro = warehouse.productItems.find(
-            (item) => item.productId === orderItem.productId.toString()
+            (item) => item.productId === orderItem.productId.toString(),
           );
           pro.currentStock += orderItem.qty;
           product.qty += orderItem.qty;
@@ -1491,7 +1638,7 @@ export const deletedSalesOrderMultiple = async (req, res, next) => {
           const warehouse = await Warehouse.findById(orderItem.warehouse);
           if (warehouse) {
             const pro = warehouse.productItems.find(
-              (item) => item.productId === orderItem.productId.toString()
+              (item) => item.productId === orderItem.productId.toString(),
             );
             pro.currentStock += orderItem.qty;
             product.qty += orderItem.qty;
@@ -1540,7 +1687,7 @@ export const deleteProductInStock = async (
   warehouse,
   warehouseId,
   orderItem,
-  date
+  date,
 ) => {
   try {
     const dates = new Date(date);
@@ -1557,7 +1704,7 @@ export const deleteProductInStock = async (
     } else {
       for (let item of stock) {
         const existingStock = item.productItems.find(
-          (item) => item.productId.toString() === warehouse._id.toString()
+          (item) => item.productId.toString() === warehouse._id.toString(),
         );
         if (existingStock) {
           if (item.date.toDateString() === dates.toDateString()) {
@@ -1922,5 +2069,137 @@ export const InvoiceIdFrom = async (req, res, next) => {
   } catch (error) {
     console.log(error);
     res.status(500).json({ message: "Internal Server Error", status: false });
+  }
+};
+
+export const verifyPaymentMode = async (req, res, next) => {
+  try {
+    const { id, paidAmount, paymentDetails } = req.body;
+    const payment = await CreateOrder.findById(id);
+    if (!payment) {
+      return res.status(200).json({ message: "Not Found", status: false });
+    }
+    payment.paidAmount = paidAmount;
+    payment.paymentDetails = paymentDetails;
+    await payment.save();
+    res.status(200).json({ message: "first Step Successfully", status: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: false,
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const verifyQrPayment = async (req, res, next) => {
+  try {
+    const { id, paymentDetails } = req.body;
+    const payment = await PaymentQr.findById(id);
+    if (!payment) {
+      return res.status(200).json({ message: "Not Found", status: false });
+    }
+    payment.statusQr = "Completed";
+    payment.paymentDetails = paymentDetails;
+    await payment.save();
+    res.status(200).json({ message: "Payment Successfully", status: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: false,
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const paymentDetails = async (req, res, next) => {
+  try {
+    const { database } = req.params;
+    const paymentDetails = await PaymentQr.find({ database });
+    if (paymentDetails.length === 0) {
+      return res.status(404).json({ message: "Not Found", status: false });
+    }
+    res
+      .status(200)
+      .json({ message: "Data Found", paymentDetails, status: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: false,
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const verifyFinalPayment = async (req, res, next) => {
+  try {
+    const { id, paymentVerified } = req.body;
+
+    const payment = await PaymentQr.findById(id);
+    if (!payment) {
+      return res.status(404).json({ message: "Not Found", status: false });
+    }
+
+    if (payment.paymentVerified === true) {
+      return res.status(400).json({
+        message: "Payment already verified",
+        status: false,
+      });
+    }
+
+    if (!paymentVerified) {
+      payment.statusQr = "Rejected";
+      payment.paymentVerified = false;
+      await payment.save();
+
+      return res.status(200).json({
+        message: "Payment rejected",
+        status: true,
+      });
+    }
+    let obj = {
+      database: payment.database,
+      partyId: payment.partyId,
+      invoiceId: payment.invoiceId,
+    };
+    const order = await CreateOrder.findOne(obj);
+    if (order) {
+      order.paymentVerified = true;
+      await order.save();
+    }
+    payment.paymentVerified = true;
+    payment.statusQr = "Approved";
+    await payment.save();
+
+    const latestReceipt = await Receipt.findOne({ status: "Active" }).sort({
+      voucherNo: -1,
+    });
+
+    const voucherNo = latestReceipt ? latestReceipt.voucherNo + 1 : 1;
+
+    const receiptData = {
+      voucherNo,
+      database: payment.database,
+      partyId: payment.partyId,
+      type: "receipt",
+      voucherType: "receipt",
+      paymentMode: "Online",
+      amount: payment.paidAmounts,
+      status: "Active",
+      date: payment.Date,
+    };
+
+    await Receipt.create(receiptData);
+
+    return res.status(200).json({
+      message: "Payment verified successfully",
+      status: true,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: false,
+      error: "Internal Server Error",
+    });
   }
 };

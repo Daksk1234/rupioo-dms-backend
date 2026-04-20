@@ -68,7 +68,7 @@ const orderItemsSchema = new mongoose.Schema(
       type: String,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 const createOrderSchema = new mongoose.Schema(
   {
@@ -384,8 +384,31 @@ const createOrderSchema = new mongoose.Schema(
     otp: {
       type: Number,
     },
+    upiId: {
+      type: String,
+    },
+    upiLink: {
+      type: String,
+    },
+    qrCode: {
+      type: String,
+    },
+    utrNumber: {
+      type: String,
+    },
+    paymentDetails: {
+      type: Object,
+    },
+    paymentVerified: {
+      type: Boolean,
+      default: false,
+    },
+    paidAmount: {
+      type: Number,
+      default: 0,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const CreateOrder = mongoose.model("createOrder", createOrderSchema);
