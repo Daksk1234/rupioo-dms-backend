@@ -42,112 +42,177 @@ const __dirname = dirname(__filename);
 export const createOrder = async (req, res, next) => {
   try {
     console.log("req.body", req.body);
-    const orderItems = req.body.orderItems;
+
+    const orderItems = Array.isArray(req.body.orderItems)
+      ? req.body.orderItems
+      : [];
+
     const date1 = new Date();
     const date2 = new Date(req.body.date);
+
     const party = await Customer.findById({ _id: req.body.partyId });
+
+    if (!party) {
+      return res.status(404).json({
+        message: "Customer not found",
+        status: false,
+      });
+    }
+
     const user = await User.findOne({ _id: party.created_by });
+
     if (!user) {
-      return res.status(401).json({ message: "No user found", status: false });
+      return res.status(401).json({
+        message: "No user found",
+        status: false,
+      });
     }
 
     if (isNaN(date2.getTime())) {
-      return res
-        .status(400)
-        .json({ message: "Invalid date format", status: false });
+      return res.status(400).json({
+        message: "Invalid date format",
+        status: false,
+      });
     }
 
-    if (date1.toDateString() === date2.toDateString()) {
-      // if (party.paymentTerm.toLowerCase() !== "cash") {
-      //     const existOrders = await CreateOrder.find({
-      //         partyId: req.body.partyId,
-      //         status: { $nin: ['Deactive', 'Cancelled', 'Cancel in process'] },
-      //         paymentStatus: false
-      //     }).sort({ date: 1, sortorder: -1 });
+    // selectedDatabase = yearly DB from frontend, example: ekopack-2025-26
+    // Only order save will happen in this DB.
+    const selectedDatabase = req.body.database || user.database;
 
-      // if (existOrders.length > 0) {
-      //     const due = existOrders[0];
-      //     const lastOrderDate = due?.date;
-      //     const currentDate = new Date();
-      //     const timeDifference = currentDate - lastOrderDate;
-      //     const days = Math.floor(timeDifference / (1000 * 60 * 60 * 24));
-      //     if (days >= party.lockInTime) {
-      //         return res.status(400).json({ message: "First, you need to pay the previous payment", status: false });
-      //     }
-      // }
-      // }
+    // mainDatabase = base DB.
+    // Product + Warehouse stock will always be handled from this DB.
+    const mainDatabase = user.database;
 
-      const orderNo = await generateOrderNo(user.database);
-      for (const orderItem of orderItems) {
-        const product = await Product.findById({ _id: orderItem.productId });
-
-        if (!product) {
-          return res.status(404).json({
-            message: `Product with ID ${orderItem.productId} not found`,
-            status: false,
-          });
-        }
-
-        product.salesDate = new Date();
-        const warehouse = await Warehouse.findById(product.warehouse);
-
-        if (warehouse) {
-          const pro = warehouse.productItems.find(
-            (item) =>
-              item.productId.toString() === orderItem.productId.toString(),
-          );
-
-          if (pro.currentStock < orderItem.qty) {
-            return res.status(400).json({
-              message: `Not enough stock for product ${orderItem.productId}`,
-              status: false,
-            });
-          }
-
-          pro.currentStock -= orderItem.qty;
-          product.qty -= orderItem.qty;
-          product.pendingQty += orderItem.qty;
-
-          await addProductInWarehouse6(
-            product,
-            product.warehouse,
-            orderItem,
-            req.body.date,
-          );
-          await warehouse.save(); // Save warehouse changes
-          await product.save(); // Save product changes
-        }
-      }
-
-      const result = await generateInvoice(user.database);
-      let challanNo = result;
-      let invoiceId = result;
-      req.body.challanNo = challanNo;
-      req.body.invoiceId = invoiceId;
-      req.body.userId = party.created_by;
-      req.body.database = user.database;
-      req.body.orderNo = orderNo;
-      req.body.orderItems = orderItems;
-
-      const savedOrder = await CreateOrder.create(req.body);
-      req.body.database = user.database;
-      req.body.totalAmount = req.body.grandTotal;
-      req.body.orderId = savedOrder._id;
-      if (party.paymentTerm === "credit") {
-        await checkLimit(req.body);
-      }
-
-      return res.status(200).json({ orderDetail: savedOrder, status: true });
-    } else {
-      return res
-        .status(404)
-        .json({ message: "select current date", status: false });
+    if (date1.toDateString() !== date2.toDateString()) {
+      return res.status(404).json({
+        message: "select current date",
+        status: false,
+      });
     }
+
+    const orderNo = await generateOrderNo(selectedDatabase);
+
+    const updatedOrderItems = [];
+
+    for (const orderItem of orderItems) {
+      const product = await Product.findOne({
+        _id: orderItem.productId,
+        database: mainDatabase,
+      });
+
+      if (!product) {
+        return res.status(404).json({
+          message: `Product with ID ${orderItem.productId} not found`,
+          status: false,
+        });
+      }
+
+      product.salesDate = new Date();
+
+      const warehouseId = orderItem?.warehouse || product.warehouse;
+
+      const warehouse = await Warehouse.findOne({
+        _id: warehouseId,
+        database: mainDatabase,
+      });
+
+      if (!warehouse) {
+        return res.status(404).json({
+          message: `Warehouse not found for product ${product.Product_Title || product._id}`,
+          status: false,
+        });
+      }
+
+      const pro = warehouse.productItems.find(
+        (item) => item.productId.toString() === orderItem.productId.toString(),
+      );
+
+      if (!pro) {
+        return res.status(404).json({
+          message: `Product not found inside warehouse ${warehouse.warehouseName || warehouse._id}`,
+          status: false,
+        });
+      }
+
+      const qty = Number(orderItem.qty) || 0;
+
+      if (Number(pro.currentStock || 0) < qty) {
+        return res.status(400).json({
+          message: `Not enough stock for product ${product.Product_Title || product._id}`,
+          status: false,
+        });
+      }
+
+      pro.currentStock = Number(pro.currentStock || 0) - qty;
+      product.qty = Number(product.qty || 0) - qty;
+      product.pendingQty = Number(product.pendingQty || 0) + qty;
+
+      const finalOrderItem = {
+        ...orderItem,
+        warehouse: warehouse._id,
+        qty,
+      };
+
+      await addProductInWarehouse6(
+        product,
+        warehouse._id,
+        finalOrderItem,
+        req.body.date,
+      );
+
+      await warehouse.save();
+      await product.save();
+
+      updatedOrderItems.push(finalOrderItem);
+    }
+
+    const result = await generateInvoice(selectedDatabase);
+
+    const challanNo = result;
+    const invoiceId = result;
+
+    req.body.challanNo = challanNo;
+    req.body.invoiceId = invoiceId;
+    req.body.userId = party.created_by;
+
+    // Save order in selected yearly database.
+    req.body.database = selectedDatabase;
+
+    req.body.orderNo = orderNo;
+    req.body.orderItems = updatedOrderItems;
+
+    // Do not make order completed here.
+    req.body.status = req.body.status || "pending";
+
+    const fyDate = new Date(req.body.date);
+    const fyMonth = fyDate.getMonth() + 1;
+    const fyYear = fyDate.getFullYear();
+    const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+
+    req.body.financialYear =
+      req.body.financialYear ||
+      `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+
+    const savedOrder = await CreateOrder.create(req.body);
+
+    req.body.totalAmount = req.body.grandTotal;
+    req.body.orderId = savedOrder._id;
+
+    if (party.paymentTerm === "credit") {
+      await checkLimit(req.body);
+    }
+
+    return res.status(200).json({
+      orderDetail: savedOrder,
+      status: true,
+    });
   } catch (err) {
     console.error("Error in createOrder:", err);
-    return res
-      .status(500)
-      .json({ error: "Internal Server Error", status: false });
+
+    return res.status(500).json({
+      error: err?.message || "Internal Server Error",
+      status: false,
+    });
   }
 };
 
@@ -155,7 +220,10 @@ export const createOrderWithInvoice = async (req, res, next) => {
   try {
     console.log("req.body", req.body);
 
-    const orderItems = req.body.orderItems;
+    const orderItems = Array.isArray(req.body.orderItems)
+      ? req.body.orderItems
+      : [];
+
     const date1 = new Date();
     const date2 = new Date(req.body.date);
 
@@ -169,186 +237,338 @@ export const createOrderWithInvoice = async (req, res, next) => {
 
     const user = await User.findOne({ _id: party.created_by });
     if (!user) {
-      return res.status(401).json({ message: "No user found", status: false });
-    } else {
-      if (date1.toDateString() === date2.toDateString()) {
-        for (const orderItem of orderItems) {
-          const product = await Product.findById({ _id: orderItem.productId });
-          if (product) {
-            const warehouse = await Warehouse.findById(product.warehouse);
-            if (warehouse) {
-              const pro = warehouse.productItems.find(
-                (item) =>
-                  item.productId.toString() === orderItem.productId.toString(),
-              );
-              // pro.currentStock -= (orderItem.qty);
-              product.qty -= orderItem.qty;
-              await warehouse.save();
-              await product.save();
-              await addProductInWarehouse5(
-                product,
-                product.warehouse,
-                orderItem,
-                req.body.date,
-              );
-            }
-          } else {
-            console.error(`Product with ID ${orderItem.productId} not found`);
-          }
+      return res.status(401).json({
+        message: "No user found",
+        status: false,
+      });
+    }
+
+    // invoiceDatabase = yearly database, only for invoice/payment/ledger save
+    const invoiceDatabase = req.body.database || user.database;
+
+    // mainDatabase = normal base database, for product/warehouse/stock deduction
+    const mainDatabase = user.database;
+
+    const deductStockFromMainDatabase = async () => {
+      const updatedOrderItems = [];
+
+      for (const orderItem of orderItems) {
+        const product = await Product.findOne({
+          _id: orderItem.productId,
+          database: mainDatabase,
+        });
+
+        if (!product) {
+          console.log(`Product with ID ${orderItem.productId} not found`);
+          updatedOrderItems.push(orderItem);
+          continue;
         }
 
-        req.body.status = "completed";
-        req.body.userId = party.created_by;
-        req.body.database = user.database;
+        const warehouseId = orderItem?.warehouse || product.warehouse;
 
-        party.remainingLimit -= req.body.grandTotal;
-        await party.save();
+        const warehouse = await Warehouse.findOne({
+          _id: warehouseId,
+          database: mainDatabase,
+        });
 
-        // ===== Extra fields added from previous API =====
-        const upiId = req.body.upiId;
-        const merchantName = req.body.merchantName;
-
-        const amount = req.body.grandTotal;
-        const orderNo =
-          req.body.orderNo || req.body.invoiceId || `INV${Date.now()}`;
-        const partyName = party.CompanyName;
-
-        const invoiceDate = new Date(req.body.date).toISOString().split("T")[0];
-        const invoiceTime = new Date().toLocaleTimeString();
-
-        const note = `Party:${partyName},Invoice:${orderNo},Date:${invoiceDate},Time:${invoiceTime},Amount:${amount}`;
-
-        const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${encodeURIComponent(
-          note,
-        )}`;
-
-        const qrFolder = path.join(process.cwd(), "public/Images");
-
-        if (!fs.existsSync(qrFolder)) {
-          fs.mkdirSync(qrFolder, { recursive: true });
+        if (!warehouse) {
+          console.log("Warehouse ID not found");
+          updatedOrderItems.push(orderItem);
+          continue;
         }
 
-        const qrFileName = `invoice-${orderNo}.png`;
-        const qrPath = path.join(qrFolder, qrFileName);
+        const pro = warehouse.productItems.find(
+          (item) =>
+            item.productId.toString() === orderItem.productId.toString(),
+        );
 
-        await QRCode.toFile(qrPath, upiLink);
-
-        req.body.upiId = upiId;
-        req.body.merchantName = merchantName;
-        req.body.upiLink = upiLink;
-        req.body.qrCode = qrFileName;
-        req.body.Time = invoiceTime;
-        req.body.Date = invoiceDate;
-        req.body.paidAmount = 0;
-        req.body.paidAmounts = amount;
-        req.body.paymentVerified = false;
-        // ===== Extra fields end =====
-
-        const [qrData, savedOrder] = await Promise.all([
-          PaymentQr.create(req.body),
-          CreateOrder.create(req.body),
-        ]);
-
-        if (savedOrder) {
-          const particular = "SalesInvoice";
-          await ledgerPartyForDebit(savedOrder, particular);
-        }
-        return res.status(200).json({ orderDetail: savedOrder, status: true });
-      } else if (date1 > date2) {
-        for (const orderItem of orderItems) {
-          const product = await Product.findById({ _id: orderItem.productId });
-          if (product) {
-            const warehouse = await Warehouse.findById(product.warehouse);
-            if (warehouse) {
-              const pro = warehouse.productItems.find(
-                (item) =>
-                  item.productId.toString() === orderItem.productId.toString(),
-              );
-              product.qty -= orderItem.qty;
-              await warehouse.save();
-              await product.save();
-              await addProductInWarehouse5(
-                product,
-                product.warehouse,
-                orderItem,
-                req.body.date,
-              );
-            }
-          } else {
-            console.error(`Product with ID ${orderItem.productId} not found`);
-          }
+        if (!pro) {
+          console.log("Product not found inside warehouse");
+          updatedOrderItems.push(orderItem);
+          continue;
         }
 
-        req.body.status = "completed";
-        req.body.userId = party.created_by;
-        req.body.database = user.database;
-        req.body.paymentStatus = true;
+        const qty = Number(orderItem.qty) || 0;
 
-        party.remainingLimit -= req.body.grandTotal;
-        await party.save();
-
-        // ===== Extra fields added from previous API =====
-        const upiId = req.body.upiId;
-        const merchantName = req.body.merchantName;
-
-        const amount = req.body.grandTotal;
-        const orderNo =
-          req.body.orderNo || req.body.invoiceId || `INV${Date.now()}`;
-        const partyName = party.CompanyName;
-
-        const invoiceDate = new Date(req.body.date).toISOString().split("T")[0];
-        const invoiceTime = new Date().toLocaleTimeString();
-
-        const note = `Party:${partyName},Invoice:${orderNo},Date:${invoiceDate},Time:${invoiceTime},Amount:${amount}`;
-
-        const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${encodeURIComponent(
-          note,
-        )}`;
-
-        const qrFolder = path.join(process.cwd(), "public/Images");
-
-        if (!fs.existsSync(qrFolder)) {
-          fs.mkdirSync(qrFolder, { recursive: true });
+        if (Number(pro.currentStock || 0) < qty) {
+          throw new Error(
+            `Not enough stock for product ${product.Product_Title || product._id}`,
+          );
         }
 
-        const qrFileName = `invoice-${orderNo}.png`;
-        const qrPath = path.join(qrFolder, qrFileName);
+        product.qty = Number(product.qty || 0) - qty;
 
-        await QRCode.toFile(qrPath, upiLink);
+        await product.save();
 
-        req.body.upiId = upiId;
-        req.body.merchantName = merchantName;
-        req.body.upiLink = upiLink;
-        req.body.qrCode = qrFileName;
-        req.body.Time = invoiceTime;
-        req.body.Date = invoiceDate;
-        req.body.paidAmount = 0;
-        req.body.paidAmounts = amount;
-        req.body.paymentVerified = false;
-        // ===== Extra fields end =====
+        await addProductInWarehouse5(
+          product,
+          warehouse._id,
+          {
+            ...orderItem,
+            warehouse: warehouse._id,
+            qty,
+          },
+          req.body.date,
+        );
 
-        const [qrData, savedOrder] = await Promise.all([
-          PaymentQr.create(req.body),
-          CreateOrder.create(req.body),
-        ]);
-
-        if (savedOrder) {
-          const particular = "SalesInvoice";
-          await ledgerPartyForDebit(savedOrder, particular);
-        }
-        return res.status(200).json({ orderDetail: savedOrder, status: true });
-      } else {
-        return res.status(400).json({
-          message: "can not purchaseOrder of next date",
-          status: false,
+        updatedOrderItems.push({
+          ...orderItem,
+          warehouse: warehouse._id,
+          qty,
         });
       }
+
+      return updatedOrderItems;
+    };
+
+    if (date1.toDateString() === date2.toDateString()) {
+      const updatedOrderItems = await deductStockFromMainDatabase();
+
+      req.body.status = "completed";
+      req.body.userId = party.created_by;
+      req.body.database = invoiceDatabase;
+      req.body.orderItems = updatedOrderItems;
+
+      party.remainingLimit -= req.body.grandTotal;
+      await party.save();
+
+      const upiId = req.body.upiId;
+      const merchantName = req.body.merchantName;
+      const accountNumber = req.body.accountNumber || "";
+      const bankIFSC = req.body.bankIFSC || "";
+
+      const amount = req.body.grandTotal;
+      const orderNo =
+        req.body.orderNo || req.body.invoiceId || `INV${Date.now()}`;
+      const partyName = party.CompanyName;
+
+      const invoiceDate = new Date(req.body.date).toISOString().split("T")[0];
+      const invoiceTime = new Date().toLocaleTimeString();
+
+      const note = `Party:${partyName},Invoice:${orderNo},Date:${invoiceDate},Time:${invoiceTime},Amount:${amount}`;
+
+      const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${encodeURIComponent(
+        note,
+      )}`;
+
+      const qrFolder = path.join(process.cwd(), "public/Images");
+
+      if (!fs.existsSync(qrFolder)) {
+        fs.mkdirSync(qrFolder, { recursive: true });
+      }
+
+      const qrFileName = `invoice-${orderNo}.png`;
+      const qrPath = path.join(qrFolder, qrFileName);
+
+      await QRCode.toFile(qrPath, upiLink);
+
+      req.body.upiId = upiId;
+      req.body.merchantName = merchantName;
+      req.body.accountNumber = accountNumber;
+      req.body.bankIFSC = bankIFSC;
+      req.body.upiLink = upiLink;
+      req.body.qrCode = qrFileName;
+      req.body.Time = invoiceTime;
+      req.body.Date = invoiceDate;
+      req.body.paidAmount = 0;
+      req.body.paidAmounts = amount;
+      req.body.paymentVerified = false;
+
+      const fyDate = new Date(req.body.date);
+      const fyMonth = fyDate.getMonth() + 1;
+      const fyYear = fyDate.getFullYear();
+      const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+
+      req.body.financialYear =
+        req.body.financialYear ||
+        `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+
+      const [qrData, savedOrder] = await Promise.all([
+        PaymentQr.create(req.body),
+        CreateOrder.create(req.body),
+      ]);
+
+      if (savedOrder) {
+        const particular = "SalesInvoice";
+        await ledgerPartyForDebit(savedOrder, particular);
+      }
+
+      return res.status(200).json({
+        orderDetail: savedOrder,
+        status: true,
+      });
+    } else if (date1 > date2) {
+      const updatedOrderItems = await deductStockFromMainDatabase();
+
+      req.body.status = "completed";
+      req.body.userId = party.created_by;
+      req.body.database = invoiceDatabase;
+      req.body.orderItems = updatedOrderItems;
+      req.body.paymentStatus = true;
+
+      party.remainingLimit -= req.body.grandTotal;
+      await party.save();
+
+      const upiId = req.body.upiId;
+      const merchantName = req.body.merchantName;
+      const accountNumber = req.body.accountNumber || "";
+      const bankIFSC = req.body.bankIFSC || "";
+
+      const amount = req.body.grandTotal;
+      const orderNo =
+        req.body.orderNo || req.body.invoiceId || `INV${Date.now()}`;
+      const partyName = party.CompanyName;
+
+      const invoiceDate = new Date(req.body.date).toISOString().split("T")[0];
+      const invoiceTime = new Date().toLocaleTimeString();
+
+      const note = `Party:${partyName},Invoice:${orderNo},Date:${invoiceDate},Time:${invoiceTime},Amount:${amount}`;
+
+      const upiLink = `upi://pay?pa=${upiId}&pn=${merchantName}&am=${amount}&cu=INR&tn=${encodeURIComponent(
+        note,
+      )}`;
+
+      const qrFolder = path.join(process.cwd(), "public/Images");
+
+      if (!fs.existsSync(qrFolder)) {
+        fs.mkdirSync(qrFolder, { recursive: true });
+      }
+
+      const qrFileName = `invoice-${orderNo}.png`;
+      const qrPath = path.join(qrFolder, qrFileName);
+
+      await QRCode.toFile(qrPath, upiLink);
+
+      req.body.upiId = upiId;
+      req.body.merchantName = merchantName;
+      req.body.accountNumber = accountNumber;
+      req.body.bankIFSC = bankIFSC;
+      req.body.upiLink = upiLink;
+      req.body.qrCode = qrFileName;
+      req.body.Time = invoiceTime;
+      req.body.Date = invoiceDate;
+      req.body.paidAmount = 0;
+      req.body.paidAmounts = amount;
+      req.body.paymentVerified = false;
+
+      const fyDate = new Date(req.body.date);
+      const fyMonth = fyDate.getMonth() + 1;
+      const fyYear = fyDate.getFullYear();
+      const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+
+      req.body.financialYear =
+        req.body.financialYear ||
+        `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+
+      const [qrData, savedOrder] = await Promise.all([
+        PaymentQr.create(req.body),
+        CreateOrder.create(req.body),
+      ]);
+
+      if (savedOrder) {
+        const particular = "SalesInvoice";
+        await ledgerPartyForDebit(savedOrder, particular);
+      }
+
+      return res.status(200).json({
+        orderDetail: savedOrder,
+        status: true,
+      });
+    } else {
+      return res.status(400).json({
+        message: "can not purchaseOrder of next date",
+        status: false,
+      });
     }
   } catch (err) {
     console.log(err);
-    return res
-      .status(500)
-      .json({ error: "Internal Server Error", status: false });
+    return res.status(500).json({
+      error: err?.message || "Internal Server Error",
+      status: false,
+    });
+  }
+};
+
+export const getCreateOrderGstBucketsByDatabase = async (req, res, next) => {
+  try {
+    const { database } = req.params;
+
+    if (!database) {
+      return res.status(400).json({
+        message: "Database is required",
+        status: false,
+      });
+    }
+
+    const orderHistory = await CreateOrder.find({
+      database,
+      status: { $ne: "Deactive" },
+    })
+      .populate({
+        path: "orderItems.productId",
+        model: "product",
+      })
+      .populate({
+        path: "userId",
+        model: "user",
+      })
+      .populate({
+        path: "partyId",
+        model: "customer",
+      })
+      .populate({
+        path: "warehouseId",
+        model: "warehouse",
+      })
+      .sort({ createdAt: -1 })
+      .exec();
+
+    if (!orderHistory || orderHistory.length === 0) {
+      return res.status(404).json({
+        message: "No order history found",
+        status: false,
+        b2bData: [],
+        b2csData: [],
+        b2clData: [],
+      });
+    }
+
+    const b2bData = [];
+    const b2csData = [];
+    const b2clData = [];
+
+    for (const invoice of orderHistory) {
+      const registrationType = invoice?.partyId?.registrationType;
+      const grandTotal = Number(invoice?.grandTotal || 0);
+
+      if (registrationType === "Regular") {
+        b2bData.push(invoice);
+      } else if (registrationType === "UnRegister") {
+        if (grandTotal <= 50000) {
+          b2csData.push(invoice);
+        } else {
+          b2clData.push(invoice);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      status: true,
+      message: "Order GST buckets fetched successfully",
+      totalOrders: orderHistory.length,
+      b2bCount: b2bData.length,
+      b2csCount: b2csData.length,
+      b2clCount: b2clData.length,
+      b2bData,
+      b2csData,
+      b2clData,
+    });
+  } catch (err) {
+    console.log("Error in getCreateOrderGstBucketsByDatabase:", err);
+    return res.status(500).json({
+      error: "Internal Server Error",
+      status: false,
+    });
   }
 };
 export const createOrderHistoryByUserId = async (req, res, next) => {
@@ -793,6 +1013,14 @@ export const updateCreateOrder = async (req, res) => {
       return res
         .status(404)
         .json({ message: "Order not found", status: false });
+
+    const fyDate = new Date(updatedFields.date || order.date || new Date());
+    const fyMonth = fyDate.getMonth() + 1;
+    const fyYear = fyDate.getFullYear();
+    const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+    updatedFields.financialYear =
+      updatedFields.financialYear ||
+      `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
 
     const oldItems = (order.orderItems || []).map((it) => ({
       ...(it.toObject?.() || it),
@@ -2157,16 +2385,19 @@ export const verifyFinalPayment = async (req, res, next) => {
         status: true,
       });
     }
+
     let obj = {
       database: payment.database,
       partyId: payment.partyId,
       invoiceId: payment.invoiceId,
     };
+
     const order = await CreateOrder.findOne(obj);
     if (order) {
       order.paymentVerified = true;
       await order.save();
     }
+
     payment.paymentVerified = true;
     payment.statusQr = "Approved";
     await payment.save();
@@ -2177,16 +2408,61 @@ export const verifyFinalPayment = async (req, res, next) => {
 
     const voucherNo = latestReceipt ? latestReceipt.voucherNo + 1 : 1;
 
+    const scannedDateString =
+      payment?.paymentDetails?.scanDate ||
+      payment?.paymentDetails?.date ||
+      payment?.Date ||
+      "";
+
+    const verifyRemark =
+      payment?.paymentDetails?.verifyRemark ||
+      payment?.paymentDetails?.remark ||
+      payment?.paymentDetails?.rawText ||
+      payment?.paymentDetails?.utrNumber ||
+      "";
+
+    const parseScannedDate = (value) => {
+      if (!value) return new Date();
+
+      const str = String(value).trim();
+
+      const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if (slashMatch) {
+        let day = Number(slashMatch[1]);
+        let month = Number(slashMatch[2]) - 1;
+        let year = Number(slashMatch[3]);
+        if (year < 100) year += 2000;
+        return new Date(year, month, day);
+      }
+
+      const dashMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (dashMatch) {
+        return new Date(
+          Number(dashMatch[1]),
+          Number(dashMatch[2]) - 1,
+          Number(dashMatch[3]),
+        );
+      }
+
+      const parsed = new Date(str);
+      return isNaN(parsed.getTime()) ? new Date() : parsed;
+    };
+
+    const savedBankDetailsId =
+      payment?.bankDetails || order?.bankDetails || null;
+
     const receiptData = {
       voucherNo,
       database: payment.database,
       partyId: payment.partyId,
       type: "receipt",
       voucherType: "receipt",
-      paymentMode: "Online",
+      paymentMode: "Bank",
       amount: payment.paidAmounts,
       status: "Active",
-      date: payment.Date,
+      date: parseScannedDate(scannedDateString),
+      remark: verifyRemark,
+      bankDetails: savedBankDetailsId,
     };
 
     await Receipt.create(receiptData);

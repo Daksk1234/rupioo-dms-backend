@@ -1,93 +1,103 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const TransporterSchema = new mongoose.Schema({
-  id: {
-    type: String
-  },
-  code: {
-    type: String
-  },
-  created_by: {
-    type: String
-  },
-  database: {
-    type: String
-  },
-  rolename: {
-    type: String
-  },
-  name: {
-    type: String
-  },
-  email: {
-    type: String
-  },
-  password: {
-    type: String
-  },
-  contactNumber: {
-    type: Number
-  },
-  pincode: {
-    type: Number
-  },
-  address1: {
-    type: String
-  },
-  address2: {
-    type: String
-  },
-  companyName: {
-    type: String
-  },
-  image: {
-    type: String
-  },
-  gstNumber: {
-    type: String
-  },
-  state: {
-    type: String
-  },
-  city: {
-    type: String
-  },
-  serviceArea: [{
-    BMName: {
-      type: String
+const TransporterSchema = new mongoose.Schema(
+  {
+    id: {
+      type: String,
     },
-    address: {
-      type: String
+    code: {
+      type: String,
+    },
+    created_by: {
+      type: String,
+    },
+    database: {
+      type: String,
+    },
+    rolename: {
+      type: String,
+    },
+    name: {
+      type: String,
+    },
+    email: {
+      type: String,
+    },
+    password: {
+      type: String,
     },
     contactNumber: {
-      type: Number
+      type: Number,
     },
     pincode: {
-      type: Number
+      type: Number,
     },
-    city: {
-      type: String
+    address1: {
+      type: String,
     },
-    state: {
-      type: String
+    address2: {
+      type: String,
+    },
+    companyName: {
+      type: String,
+    },
+    image: {
+      type: String,
     },
     gstNumber: {
-      type: String
+      type: String,
     },
-    otherContactNumber: {
-      type: String
-    }
-  }],
-  OpeningBalance: {
-    type: Number
+    state: {
+      type: String,
+    },
+    city: {
+      type: String,
+    },
+    serviceArea: [
+      {
+        BMName: {
+          type: String,
+        },
+        address: {
+          type: String,
+        },
+        contactNumber: {
+          type: Number,
+        },
+        pincode: {
+          type: Number,
+        },
+        city: {
+          type: String,
+        },
+        state: {
+          type: String,
+        },
+        gstNumber: {
+          type: String,
+        },
+        otherContactNumber: {
+          type: String,
+        },
+      },
+    ],
+    OpeningBalance: {
+      type: Number,
+    },
+    openingFinancialYear: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    Type: {
+      type: String,
+    },
+    status: {
+      type: String,
+      default: "Active",
+    },
   },
-  Type: {
-    type: String
-  },
-  status: {
-    type: String,
-    default: "Active"
-  }
-}, { timestamps: true });
+  { timestamps: true },
+);
 
-export const Transporter = mongoose.model('transporter', TransporterSchema);
+export const Transporter = mongoose.model("transporter", TransporterSchema);

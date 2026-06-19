@@ -3,8 +3,6 @@ import { Ledger } from "../model/ledger.model.js";
 
 export const viewLedgerByParty = async (req, res, next) => {
   try {
-    const { database, superAdminId } = req.query || {};
-
     let ledger = await Ledger.find({
       $or: [
         { userId: req.params.id },
@@ -19,47 +17,6 @@ export const viewLedgerByParty = async (req, res, next) => {
       .populate({ path: "expenseId", model: "createAccount" })
       .populate({ path: "transporterId", model: "transporter" });
 
-    // ✅ database filter (optional)
-    if (database) {
-      const dbLower = String(database).trim().toLowerCase();
-      ledger = (ledger || []).filter((l) => {
-        const rowDb = String(
-          l?.database ||
-            l?.db ||
-            l?.userId?.database ||
-            l?.partyId?.database ||
-            ""
-        )
-          .trim()
-          .toLowerCase();
-
-        return rowDb ? rowDb === dbLower : true;
-      });
-    }
-
-    // ✅ superAdmin filter (optional)
-    if (superAdminId) {
-      const target = String(superAdminId).trim();
-
-      ledger = (ledger || []).filter((l) => {
-        let cand =
-          l?.superAdminId ||
-          l?.created_by ||
-          l?.createdBy ||
-          (l?.userId ? l.userId.created_by || l.userId.createdBy : null) ||
-          (l?.partyId ? l.partyId.created_by || l.partyId.createdBy : null) ||
-          (l?.transporterId
-            ? l.transporterId.created_by || l.transporterId.createdBy
-            : null) ||
-          null;
-
-        if (cand && typeof cand === "object") cand = cand._id || cand.id;
-        const sid = cand ? String(cand).trim() : "";
-
-        return sid ? sid === target : false;
-      });
-    }
-
     if (!ledger || ledger.length === 0) {
       return res.status(404).json({ message: "Not Found", status: false });
     }
@@ -70,6 +27,54 @@ export const viewLedgerByParty = async (req, res, next) => {
     return res
       .status(500)
       .json({ error: "Internal Server Error", status: false });
+  }
+};
+
+export const viewLedgerByPartyDATABASE = async (req, res, next) => {
+  try {
+    const { id, database } = req.params;
+
+    if (!id || !database) {
+      return res.status(400).json({
+        message: "Id and database are required",
+        status: false,
+      });
+    }
+
+    const selectedDatabase = decodeURIComponent(database);
+
+    let ledger = await Ledger.find({
+      database: selectedDatabase,
+      $or: [
+        { userId: id },
+        { partyId: id },
+        { expenseId: id },
+        { transporterId: id },
+      ],
+    })
+      .sort({ date: 1, sortorder: -1 })
+      .populate({ path: "partyId", model: "customer" })
+      .populate({ path: "userId", model: "user" })
+      .populate({ path: "expenseId", model: "createAccount" })
+      .populate({ path: "transporterId", model: "transporter" });
+
+    if (!ledger || ledger.length === 0) {
+      return res.status(404).json({
+        message: "Not Found",
+        status: false,
+      });
+    }
+
+    return res.status(200).json({
+      Ledger: ledger,
+      status: true,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: "Internal Server Error",
+      status: false,
+    });
   }
 };
 
@@ -130,7 +135,7 @@ export const viewLedgerByPartySalesApp = async (req, res, next) => {
       }
       for (let item of ledger) {
         const existingLedger = await ledgerData.find(
-          (i) => i.partyId._id.toString() === item.partyId._id.toString()
+          (i) => i.partyId._id.toString() === item.partyId._id.toString(),
         );
         if (existingLedger) {
           if (item.debit) {

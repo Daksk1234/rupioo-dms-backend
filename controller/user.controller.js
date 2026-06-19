@@ -44,6 +44,18 @@ const mergeGroupPermissions = (groups = []) => {
   }));
 };
 
+const normalizeOpeningFinancialYear = (value) => {
+  const raw = String(value || "").trim();
+
+  const match = raw.match(/^(\d{4})\s*-\s*(\d{2}|\d{4})$/);
+  if (!match) return raw;
+
+  const startYear = match[1];
+  const endYear = match[2].length === 4 ? match[2].slice(-2) : match[2];
+
+  return `${startYear}-${endYear}`;
+};
+
 const OPENCAGE_API_KEY =
   process.env.OPENCAGE_API_KEY || "d10245fed7384c039fdd70b8967f540f";
 
@@ -194,54 +206,98 @@ const loadallowedPermissionForUser = async (user) => {
   }
 };
 
-// async function buildAllowedPermissionForUser(userDoc) {
-//   try {
-//     // Only apply plan->groups->permissions logic for SuperAdmin
-//     const roleName =
-//       typeof userDoc?.rolename === "object"
-//         ? userDoc?.rolename?.roleName
-//         : userDoc?.rolename?.roleName; // already populated in your code
+// const getCurrentFinancialYearStart = () => {
+//   const now = new Date();
+//   const year = now.getFullYear();
+//   const month = now.getMonth() + 1; // Jan = 1
 
-//     if (roleName !== "SuperAdmin") return [];
+//   // Indian FY: Apr to Mar
+//   return month >= 4 ? year : year - 1;
+// };
 
-//     if (!userDoc?.subscriptionPlan) return [];
+// const makeFinancialYearLabel = (startYear) => {
+//   return `${startYear}-${String(startYear + 1).slice(-2)}`;
+// };
 
-//     // load plan with groups
-//     const plan = await Subscription.findById(userDoc.subscriptionPlan).populate(
-//       {
-//         path: "groups",
-//         model: Group.modelName || "groupbundle",
-//       }
-//     );
+// const buildFinancialYears = (
+//   startYear = getCurrentFinancialYearStart(),
+//   count = 10,
+// ) => {
+//   return Array.from({ length: count }, (_, i) =>
+//     makeFinancialYearLabel(startYear + i),
+//   );
+// };
 
-//     if (!plan || !Array.isArray(plan.groups) || plan.groups.length === 0) {
-//       return [];
+// const normalizeFinancialYears = (value, shouldCreateDefault = false) => {
+//   let financialYears = value;
+
+//   if (typeof financialYears === "string") {
+//     try {
+//       financialYears = JSON.parse(financialYears);
+//     } catch {
+//       financialYears = financialYears
+//         .split(",")
+//         .map((x) => x.trim())
+//         .filter(Boolean);
 //     }
-
-//     // flatten + de-duplicate per page
-//     const perPage = new Map(); // pagename -> Set(perms)
-//     for (const g of plan.groups) {
-//       const permsArr = Array.isArray(g?.permissions) ? g.permissions : [];
-//       for (const p of permsArr) {
-//         const page = p?.pagename;
-//         if (!page) continue;
-//         const set = perPage.get(page) || new Set();
-//         (Array.isArray(p?.permission) ? p.permission : []).forEach((perm) =>
-//           set.add(perm)
-//         );
-//         perPage.set(page, set);
-//       }
-//     }
-
-//     return Array.from(perPage.entries()).map(([pagename, set]) => ({
-//       pagename,
-//       permission: Array.from(set),
-//     }));
-//   } catch {
-//     return [];
 //   }
-// }
-/** ----------------------------------------------------------------------------- */
+
+//   if (!Array.isArray(financialYears)) {
+//     financialYears = [];
+//   }
+
+//   financialYears = [
+//     ...new Set(
+//       financialYears.map((x) => String(x || "").trim()).filter(Boolean),
+//     ),
+//   ];
+
+//   if (!financialYears.length && shouldCreateDefault) {
+//     financialYears = buildFinancialYears();
+//   }
+
+//   return financialYears;
+// };
+
+const getFinancialYearFromDate = (dateValue = new Date()) => {
+  const date = new Date(dateValue);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // Jan = 1
+
+  // Indian financial year: April to March
+  const startYear = month >= 4 ? year : year - 1;
+
+  return `${startYear}-${String(startYear + 1).slice(-2)}`;
+};
+
+const normalizeFinancialYears = (value) => {
+  let financialYears = value;
+
+  if (typeof financialYears === "string") {
+    try {
+      financialYears = JSON.parse(financialYears);
+    } catch {
+      financialYears = financialYears
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+    }
+  }
+
+  if (!Array.isArray(financialYears)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      financialYears.map((x) => String(x || "").trim()).filter(Boolean),
+    ),
+  ];
+};
+
+const isSuperAdminRoleName = (roleName = "") => {
+  return String(roleName || "").toLowerCase() === "superadmin";
+};
 
 export const SaveUser = async (req, res, next) => {
   try {
@@ -251,6 +307,7 @@ export const SaveUser = async (req, res, next) => {
         database: req.body.database,
         id: req.body.id,
       });
+
       if (existing) {
         return res
           .status(404)
@@ -261,6 +318,7 @@ export const SaveUser = async (req, res, next) => {
         .status(400)
         .json({ message: "user id required", status: false });
     }
+
     if (req.body.email) {
       const { email, database } = req.body;
 
@@ -275,6 +333,7 @@ export const SaveUser = async (req, res, next) => {
           .json({ message: "Email already exists", status: false });
       }
     }
+
     if (req.body.mobileNumber) {
       const { mobileNumber, database } = req.body;
 
@@ -293,13 +352,16 @@ export const SaveUser = async (req, res, next) => {
           .json({ message: "MobileNumber already exists", status: false });
       }
     }
+
     if (req.file) {
       req.body.profileImage = req.file.filename;
     }
+
     if (req.body.firstName && (req.body.Aadhar_No || req.body.Pan_No)) {
       let last4 = "";
       let existName = req.body.firstName.split(" ");
       let fname = existName[0];
+
       if (req.body.Aadhar_No) {
         const adhar = req.body.Aadhar_No.trim();
         last4 = adhar.slice(-4);
@@ -314,32 +376,33 @@ export const SaveUser = async (req, res, next) => {
     if (req.body.setRule && req.body.setRule.length > 0) {
       req.body.setRule = await JSON.parse(req.body.setRule);
     }
+
     if (req.body.reference && req.body.reference.length > 0) {
       req.body.reference = await JSON.parse(req.body.reference);
     }
+
     if (req.body.serviceArea && req.body.serviceArea?.length > 0) {
       req.body.service = await JSON.parse(req.body.serviceArea);
       delete req.body.serviceArea;
     }
 
-    /** -------------------- NEW: accept groups from Master while creating SuperAdmin -------------------- */
-    // groups could arrive as JSON string or array of ids
+    /** -------------------- accept groups from Master while creating SuperAdmin -------------------- */
     if (req.body.groups) {
       try {
         if (typeof req.body.groups === "string") {
-          // if sent like '["groupId1","groupId2"]'
           req.body.groups = JSON.parse(req.body.groups);
         }
       } catch {
         // ignore parse error; fall back to raw
       }
+
       if (!Array.isArray(req.body.groups)) req.body.groups = [];
 
-      // validate existence (not strictly required, but safer)
       if (req.body.groups.length) {
         const count = await GroupBundle.countDocuments({
           _id: { $in: req.body.groups },
         });
+
         if (count !== req.body.groups.length) {
           return res
             .status(400)
@@ -350,26 +413,51 @@ export const SaveUser = async (req, res, next) => {
       req.body.groups = [];
     }
 
-    // If Master is creating SuperAdmin: role is NOT required.
-    // If rolename is missing but groups are present, we auto-assign the "SuperAdmin" role.
     if (
       (!req.body.rolename || req.body.rolename === "") &&
       req.body.groups.length > 0
     ) {
       const superAdminRole = await Role.findOne({ roleName: "SuperAdmin" });
+
       if (!superAdminRole) {
         return res
           .status(404)
           .json({ message: "SuperAdmin role not configured", status: false });
       }
+
       req.body.rolename = superAdminRole._id.toString();
     }
     /** -------------------------------------------------------------------------------------------------- */
 
+    /**
+     * FINANCIAL YEAR ARRAY
+     * No frontend selection.
+     * When SuperAdmin is created, save only the current FY in array.
+     * Example: ["2026-27"]
+     */
+    if (req.body.rolename) {
+      const roleForFinancialYear = await Role.findById(req.body.rolename);
+
+      if (
+        isSuperAdminRoleName(roleForFinancialYear?.roleName) ||
+        isSuperAdminRoleName(req.body.position)
+      ) {
+        const incomingFinancialYears = normalizeFinancialYears(
+          req.body.financialYears,
+        );
+
+        req.body.financialYears = incomingFinancialYears.length
+          ? incomingFinancialYears
+          : [getFinancialYearFromDate(new Date())];
+      }
+    }
+
     if (req.body.subscriptionPlan) {
       const sub = await Subscription.findById(req.body.subscriptionPlan);
+
       if (sub) {
         const date = new Date();
+
         req.body.planStart = date;
         req.body.planEnd = new Date(
           date.getTime() + sub.days * 24 * 60 * 60 * 1000,
@@ -380,13 +468,16 @@ export const SaveUser = async (req, res, next) => {
       }
     } else {
       const existRole = await Role.findOne({ roleName: "SuperAdmin" });
+
       if (!existRole) {
         console.log("Role Not Found");
       }
+
       const existingSuperAdmin = await User.findOne({
         database: req.body.database,
         rolename: existRole?._id?.toString(),
       });
+
       if (!existingSuperAdmin) {
         console.log("user not found");
       } else {
@@ -397,6 +488,7 @@ export const SaveUser = async (req, res, next) => {
           });
         } else {
           existingSuperAdmin.userRegister += 1;
+
           if (
             existingSuperAdmin.userRegister <= existingSuperAdmin.userAllotted
           ) {
@@ -410,11 +502,14 @@ export const SaveUser = async (req, res, next) => {
         }
       }
     }
+
     if (req.body.role && req.body.role.length > 0) {
       req.body.role = JSON.parse(req.body.role);
     }
+
     if (req.body.rolename) {
       const findRole = await Role.findById(req.body.rolename);
+
       if (
         findRole?.roleName === "Labour" ||
         findRole?.roleName === "Packing And Labour"
@@ -423,16 +518,26 @@ export const SaveUser = async (req, res, next) => {
         req.body.pakerId = pakerId;
       }
     }
+
     if (req.body.warehouse) {
       req.body.warehouse = await JSON.parse(req.body.warehouse);
     }
 
+    if (req.body.openingFinancialYear) {
+      req.body.openingFinancialYear = normalizeOpeningFinancialYear(
+        req.body.openingFinancialYear,
+      );
+    }
+
     const user = await User.create(req.body);
+
     if (req.body.warehouse) {
       await assingWarehouse(user.warehouse, user._id);
     }
+
     if (user) {
       await setSalary(user);
+
       if (user?.rolename) {
         const findRoles = await Role.findById(user.rolename);
 
@@ -469,15 +574,19 @@ export const SaveUser = async (req, res, next) => {
         }
       }
     }
+
     return user
-      ? res
-          .status(200)
-          .json({ message: "Data Save Successfull", User: user, status: true })
+      ? res.status(200).json({
+          message: "Data Save Successfull",
+          User: user,
+          status: true,
+        })
       : res
           .status(400)
           .json({ message: "Something Went Wrong", status: false });
   } catch (err) {
     console.log(err);
+
     return res
       .status(500)
       .json({ error: "Internal Server Error", status: false });
@@ -552,11 +661,9 @@ export const ViewCashUserByDatabase = async (req, res, next) => {
       });
     }
 
-    // const normalizedPan = panNumber.trim().toUpperCase();
-
     const user = await User.findOne({
-      id: "CASH ACCOUNT-Cash-in-Hand",
-      account: "Cash-in-Hand",
+      id: "CASH ACCOUNT-Cash-in-hand",
+      account: "Cash-in-hand",
       database: req.params.database,
       status: "Active",
     })
@@ -687,12 +794,13 @@ export const UpdateUser = async (req, res, next) => {
         }
       });
     }
+
     const userId = req.params.id;
+
     if (req.body.role && req.body.role.length > 0) {
       req.body.role = JSON.parse(req.body.role);
     }
 
-    // NEW: allow updating groups (optional)
     if (typeof req.body.groups === "string") {
       try {
         req.body.groups = JSON.parse(req.body.groups);
@@ -702,14 +810,17 @@ export const UpdateUser = async (req, res, next) => {
     }
 
     const existingUser = await User.findById(userId);
+
     if (!existingUser) {
       return res.status(404).json({ error: "user not found", status: false });
     } else {
       if (req.body.setRule) {
         req.body.setRule = JSON.parse(req.body.setRule);
       }
+
       if (req.body.rolename) {
         const findRole = await Role.findById(req.body.rolename);
+
         if (
           findRole.roleName === "Labour" ||
           findRole.roleName === "Packing And Labour"
@@ -725,6 +836,7 @@ export const UpdateUser = async (req, res, next) => {
         let last4 = "";
         let existName = req.body.firstName.split(" ");
         let fname = existName[0];
+
         if (req.body.Aadhar_No) {
           const adhar = req.body.Aadhar_No.trim();
           last4 = adhar.slice(-4);
@@ -732,27 +844,74 @@ export const UpdateUser = async (req, res, next) => {
           const pan = req.body.Pan_No.trim();
           last4 = pan.slice(-4);
         }
+
         req.body.sId = `${fname}${last4}`;
       }
+
       if (req.body.warehouse && req.body.warehouse?.length > 0) {
         req.body.warehouse = JSON.parse(req.body.warehouse);
       }
+
       if (req.body.reference && req.body.reference?.length > 0) {
         req.body.reference = await JSON.parse(req.body.reference);
       }
+
       if (req.body.serviceArea && req.body.serviceArea?.length > 0) {
         req.body.serviceArea = await JSON.parse(req.body.serviceArea);
       }
+
+      /**
+       * FINANCIAL YEAR ARRAY ON EDIT
+       * No frontend option.
+       * If existing SuperAdmin already has financialYears, keep it unchanged.
+       * If missing/empty, add the FY based on createdAt.
+       */
+      const roleIdForCheck = req.body.rolename || existingUser.rolename;
+      let roleForFinancialYear = null;
+
+      if (roleIdForCheck) {
+        roleForFinancialYear = await Role.findById(roleIdForCheck);
+      }
+
+      const isSuperAdmin =
+        isSuperAdminRoleName(roleForFinancialYear?.roleName) ||
+        isSuperAdminRoleName(req.body.position) ||
+        isSuperAdminRoleName(existingUser.position);
+
+      if (isSuperAdmin) {
+        const existingFinancialYears = normalizeFinancialYears(
+          existingUser.financialYears,
+        );
+
+        if (existingFinancialYears.length > 0) {
+          req.body.financialYears = existingFinancialYears;
+        } else {
+          req.body.financialYears = [
+            getFinancialYearFromDate(existingUser.createdAt || new Date()),
+          ];
+        }
+      }
+
+      if (req.body.openingFinancialYear) {
+        req.body.openingFinancialYear = normalizeOpeningFinancialYear(
+          req.body.openingFinancialYear,
+        );
+      }
+
       const updatedUser = req.body;
+
       const user = await User.findByIdAndUpdate(userId, updatedUser, {
         new: true,
       });
+
       if (req.body.warehouse?.length > 0) {
         await assingWarehouse(user.warehouse, userId);
       }
+
       if (user) {
         await setSalary(user);
       }
+
       return res.status(200).json({
         User: user,
         message: "User Updated Successfully",
@@ -761,6 +920,7 @@ export const UpdateUser = async (req, res, next) => {
     }
   } catch (err) {
     console.error(err);
+
     return res
       .status(500)
       .json({ error: "Internal Server Error", status: false });

@@ -1,0 +1,2 @@
+// File: routes/hrmAttendanceCorrection.routes.js
+import express from "express";import{createCorrection,listCorrections}from"../controller/hrmAttendanceCorrection.controller.js";export const hrmAttendanceCorrectionRouter=express.Router();hrmAttendanceCorrectionRouter.post("/create/:database",createCorrection);hrmAttendanceCorrectionRouter.get("/list/:database",listCorrections);export default hrmAttendanceCorrectionRouter;

@@ -8,6 +8,10 @@ const ReceiptSchema = new mongoose.Schema(
     database: {
       type: String,
     },
+    financialYear: {
+      type: String,
+      default: "",
+    },
     userId: {
       type: String,
     },

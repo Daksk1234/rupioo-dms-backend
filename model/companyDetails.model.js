@@ -1,135 +1,180 @@
 import mongoose from "mongoose";
 
-const CompanySchema = new mongoose.Schema({
-    created_by: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "user"
-    },
-    database: {
-        type: String
-    },
-    reDate: {
-        type: String
-    },
-    email: {
-        type: String
-    },
-    name: {
-        type: String
-    },
-    gstNo: {
-        type: String
-    },
-    stateCode: {
-        type: Number
-    },
-    actStateCode: {
-        type: Number
-    },
-    address: {
-        type: String
-    },
-    address1: {
-        type: String
-    },
-    address2: {
-        type: String
-    },
-    place: {
-        type: String
-    },
-    mobileNo: {
-        type: String
-    },
-    logo: {
-        type: String
-    },
-    qr_code: {
-        type: String
-    },
-    signature: {
-        type: String
+const InvoiceSeriesSchema = new mongoose.Schema(
+  {
+    financialYear: {
+      type: String,
     },
     Prefix: {
-        type: String
+      type: String,
     },
     Suffix: {
-        type: String
+      type: String,
     },
+  },
+  { _id: false },
+);
+
+const CompanySchema = new mongoose.Schema(
+  {
+    created_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+    },
+    database: {
+      type: String,
+    },
+    reDate: {
+      type: String,
+    },
+    email: {
+      type: String,
+    },
+    name: {
+      type: String,
+    },
+    gstNo: {
+      type: String,
+    },
+    stateCode: {
+      type: Number,
+    },
+    actStateCode: {
+      type: Number,
+    },
+    address: {
+      type: String,
+    },
+    address1: {
+      type: String,
+    },
+    address2: {
+      type: String,
+    },
+    place: {
+      type: String,
+    },
+    mobileNo: {
+      type: String,
+    },
+    logo: {
+      type: String,
+    },
+    qr_code: {
+      type: String,
+    },
+    signature: {
+      type: String,
+    },
+
+    // Old/current invoice fields - keep these for existing invoice pages
+    Prefix: {
+      type: String,
+    },
+    Suffix: {
+      type: String,
+    },
+
+    // New FY-wise invoice prefix/suffix list
+    invoiceSeries: [InvoiceSeriesSchema],
+
+    // Same values saved in localStorage after login
+    activeFinancialYear: {
+      type: String,
+    },
+    activeInvoicePrefix: {
+      type: String,
+    },
+    activeInvoiceSuffix: {
+      type: String,
+    },
+
     billNo: {
-        type: Number
+      type: Number,
     },
     dummy: {
-        type: String
+      type: String,
     },
-    bankDetails: [{
+
+    bankDetails: [
+      {
         bankName: {
-            type: String
+          type: String,
         },
         bankIFSC: {
-            type: String
+          type: String,
         },
         accountNumber: {
-            type: Number
+          type: Number,
         },
         branchName: {
-            type: String
+          type: String,
         },
         bankAddress: {
-            type: String
+          type: String,
         },
         bankMicr: {
-            type: String
+          type: String,
         },
         upiId: {
-            type: String
+          type: String,
         },
         gpay_PhonepayNumber: {
-            type: String
+          type: String,
         },
         openingBalance: {
-            type: String
+          type: String,
         },
         openingType: {
-            type: String
-        }
-    }],
+          type: String,
+        },
+      },
+    ],
+
     selectedBank: {
-        type: String
+      type: String,
     },
     imagePosition: {
-        type: String
+      type: String,
     },
     billTo: {
-        type: String
+      type: String,
     },
     shipto: {
-        type: String
+      type: String,
     },
     BillNumber: {
-        type: String
+      type: String,
     },
     termsAndCondition: {
-        type: String
+      type: String,
     },
     orderNo: {
-        type: Number,
-        default: 0
+      type: Number,
+      default: 0,
     },
     warehouseDummy: {
-        type: Number,
-        default: 0
+      type: Number,
+      default: 0,
     },
     openingBalance: {
-        type: String
+      type: String,
     },
     openingType: {
-        type: String
+      type: String,
     },
-    cancelInvoice: [{
+    cancelInvoice: [
+      {
         invoice: {
-            type: String
-        }
-    }]
-}, { timestamps: true })
-export const CompanyDetails = mongoose.model("companyDetail", CompanySchema)
+          type: String,
+        },
+      },
+    ],
+    financialYears: {
+      type: [String],
+    },
+  },
+  { timestamps: true },
+);
+
+export const CompanyDetails = mongoose.model("companyDetail", CompanySchema);

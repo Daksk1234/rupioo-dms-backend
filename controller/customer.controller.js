@@ -21,6 +21,18 @@ import { PurchaseOrder } from "../model/purchaseOrder.model.js";
 import { LoginVerificationMail } from "../service/sendmail.js";
 dotenv.config();
 
+const normalizeOpeningFinancialYear = (value) => {
+  const raw = String(value || "").trim();
+
+  const match = raw.match(/^(\d{4})\s*-\s*(\d{2}|\d{4})$/);
+  if (!match) return raw;
+
+  const startYear = match[1];
+  const endYear = match[2].length === 4 ? match[2].slice(-2) : match[2];
+
+  return `${startYear}-${endYear}`;
+};
+
 export const SaveCustomer = async (req, res, next) => {
   try {
     if (req.body.id) {
@@ -104,6 +116,11 @@ export const SaveCustomer = async (req, res, next) => {
     }
     if (req.body.limit) {
       req.body.remainingLimit = req.body.limit;
+    }
+    if (req.body.openingFinancialYear) {
+      req.body.openingFinancialYear = normalizeOpeningFinancialYear(
+        req.body.openingFinancialYear,
+      );
     }
     const customer = await Customer.create(req.body);
     return customer
@@ -278,6 +295,11 @@ export const UpdateCustomer = async (req, res, next) => {
       }
       if (req.body.bankDetails) {
         req.body.bankDetails = JSON.parse(req.body.bankDetails);
+      }
+      if (req.body.openingFinancialYear) {
+        req.body.openingFinancialYear = normalizeOpeningFinancialYear(
+          req.body.openingFinancialYear,
+        );
       }
       const updatedCustomer = req.body;
       const existOver = await OverDueReport.findOne({

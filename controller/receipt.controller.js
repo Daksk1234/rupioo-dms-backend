@@ -141,6 +141,22 @@ export const applyReceiptTransferFlags = async (data) => {
   return out;
 };
 
+const getFinancialYearLabel = (dateValue = new Date()) => {
+  let d = new Date(dateValue);
+
+  if (isNaN(d.getTime())) {
+    d = new Date();
+  }
+
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+
+  const startYear = month >= 4 ? year : year - 1;
+  const endYearShort = String(startYear + 1).slice(-2);
+
+  return `${startYear}-${endYearShort}`;
+};
+
 /* ========================= RECEIPT ========================= */
 
 export const saveReceipt = async (req, res, next) => {
@@ -165,6 +181,9 @@ export const saveReceipt = async (req, res, next) => {
       req.body.voucherType = "receipt";
       req.body.voucherDate = new Date();
       req.body.lockStatus = "No";
+
+      item.financialYear =
+        item.financialYear || getFinancialYearLabel(item.date);
 
       let receiptData = normalizeReceiptBankFields({ ...req.body, ...item });
       receiptData = await applyReceiptTransferFlags(receiptData);
@@ -221,6 +240,9 @@ export const UpdateReceipt = async (req, res, next) => {
     req.body.voucherType = "receipt";
     req.body.voucherDate = new Date();
     req.body.lockStatus = "No";
+    req.body.financialYear =
+      req.body.financialYear ||
+      getFinancialYearLabel(req.body.date || existingReceipt.date);
 
     let updatedBody = normalizeReceiptBankFields({ ...req.body });
     updatedBody = await applyReceiptTransferFlags(updatedBody);
@@ -287,8 +309,18 @@ export const UpdateReceipt = async (req, res, next) => {
 
 export const viewReceipt = async (req, res, next) => {
   try {
+    const receiptDatabase = req.params.database; // example: "company-2026-27"
+
+    // Remove financial year suffix only for master data lookup
+    // "company-2026-27" => "company"
+    // "my-company-db-2026-27" => "my-company-db"
+    const mainDatabase = String(receiptDatabase || "").replace(
+      /-\d{4}-\d{2}$/,
+      "",
+    );
+
     const receipts = await Receipt.find({
-      database: req.params.database,
+      database: receiptDatabase, // keep FY database for Receipt
       status: "Active",
     })
       .sort({ sortorder: -1 })
@@ -302,6 +334,7 @@ export const viewReceipt = async (req, res, next) => {
     }
 
     const expenseIds = [];
+
     for (const r of receipts) {
       if (
         r?.expenseId &&
@@ -310,31 +343,39 @@ export const viewReceipt = async (req, res, next) => {
         expenseIds.push(String(r.expenseId));
       }
     }
+
     const uniqueExpenseIds = [...new Set(expenseIds)];
 
     const createAccMap = new Map();
+
     if (uniqueExpenseIds.length) {
       const accDocs = await CreateAccount.find({
         _id: { $in: uniqueExpenseIds },
-        database: req.params.database,
+        database: mainDatabase, // use main database for CreateAccount
         status: "Active",
       }).lean();
 
-      for (const d of accDocs) createAccMap.set(String(d._id), d);
+      for (const d of accDocs) {
+        createAccMap.set(String(d._id), d);
+      }
     }
 
     const remainingIds = uniqueExpenseIds.filter((x) => !createAccMap.has(x));
 
     let bankMap = new Map();
+
     if (remainingIds.length) {
       const company = await CompanyDetails.findOne({
-        database: req.params.database,
+        database: mainDatabase, // use main database for CompanyDetails
       }).lean();
 
       if (company && Array.isArray(company.bankDetails)) {
         for (const b of company.bankDetails) {
           const bid = b?._id ? String(b._id) : null;
-          if (bid) bankMap.set(bid, b);
+
+          if (bid) {
+            bankMap.set(bid, b);
+          }
         }
       }
     }
@@ -343,12 +384,15 @@ export const viewReceipt = async (req, res, next) => {
       const out = { ...r };
 
       const expId = out?.expenseId ? String(out.expenseId) : "";
+
       if (expId && mongoose.Types.ObjectId.isValid(expId)) {
         const acc = createAccMap.get(expId);
+
         if (acc) {
           out.expenseId = acc;
         } else {
           const bank = bankMap.get(expId);
+
           if (bank) {
             out.expenseId = {
               ...bank,
@@ -361,12 +405,17 @@ export const viewReceipt = async (req, res, next) => {
       return out;
     });
 
-    return res.status(200).json({ Receipts: finalReceipts, status: true });
+    return res.status(200).json({
+      Receipts: finalReceipts,
+      status: true,
+    });
   } catch (err) {
     console.error(err);
-    return res
-      .status(500)
-      .json({ error: "Internal Server Error", status: false });
+
+    return res.status(500).json({
+      error: "Internal Server Error",
+      status: false,
+    });
   }
 };
 
@@ -437,6 +486,9 @@ export const savePayment = async (req, res, next) => {
 
       req.body.voucherType = "payment";
 
+      item.financialYear =
+        item.financialYear || getFinancialYearLabel(item.date);
+
       let receiptData = { ...req.body, ...item };
       receiptData = normalizeReceiptBankFields(receiptData);
       receiptData = await applyReceiptTransferFlags(receiptData);
@@ -482,6 +534,9 @@ export const UpdatePayment = async (req, res, next) => {
     }
 
     req.body.voucherType = "payment";
+    req.body.financialYear =
+      req.body.financialYear ||
+      getFinancialYearLabel(req.body.date || existingReceipt.date);
 
     let updatedBody = normalizeReceiptBankFields({ ...req.body });
     updatedBody = await applyReceiptTransferFlags(updatedBody);
@@ -1204,11 +1259,21 @@ export const CashBookReport = async (req, res, next) => {
 
 export const BankAccountReport = async (req, res, next) => {
   try {
+    const receiptDatabase = req.params.database; // example: ekopack-2026-27
+
+    // Use normal/main database for master data only
+    // ekopack-2026-27 => ekopack
+    // my-company-db-2030-31 => my-company-db
+    const mainDatabase = String(receiptDatabase || "").replace(
+      /-\d{4}-\d{2}$/,
+      "",
+    );
+
     const startDate = req.body.startDate ? new Date(req.body.startDate) : null;
     const endDate = req.body.endDate ? new Date(req.body.endDate) : null;
 
     const targetQuery = {
-      database: req.params.database,
+      database: receiptDatabase, // keep FY database for Receipt
       paymentMode: { $in: ["Bank", "Cash"] },
       status: "Active",
     };
@@ -1255,8 +1320,12 @@ export const BankAccountReport = async (req, res, next) => {
     ];
 
     const candidateObjIds = toObjIdArray(allCandidateIds);
+
     const expenseDocs = candidateObjIds.length
-      ? await CreateAccount.find({ _id: { $in: candidateObjIds } }).lean()
+      ? await CreateAccount.find({
+          _id: { $in: candidateObjIds },
+          database: mainDatabase, // use normal database here
+        }).lean()
       : [];
 
     const expenseMap = new Map(
@@ -1274,7 +1343,7 @@ export const BankAccountReport = async (req, res, next) => {
       const bankObjIds = toObjIdArray(unresolvedForBankSubdoc);
 
       const companies = await CompanyDetails.find({
-        database: req.params.database,
+        database: mainDatabase, // use normal database here
         "bankDetails._id": { $in: bankObjIds },
       }).lean();
 
@@ -1296,10 +1365,16 @@ export const BankAccountReport = async (req, res, next) => {
 
     const resolveBankDetailsObject = (id) => {
       if (!id) return null;
+
       const key = String(id);
 
       if (isCashId(key)) {
-        return { _id: CASH_ID, bankName: "Cash", isCash: true, _kind: "cash" };
+        return {
+          _id: CASH_ID,
+          bankName: "Cash",
+          isCash: true,
+          _kind: "cash",
+        };
       }
 
       const exp = expenseMap.get(key);
@@ -1316,10 +1391,16 @@ export const BankAccountReport = async (req, res, next) => {
 
     const resolveExpenseIdObject = (id) => {
       if (!id) return null;
+
       const key = String(id);
 
       if (isCashId(key)) {
-        return { _id: CASH_ID, title: "Cash", isCash: true, _kind: "cash" };
+        return {
+          _id: CASH_ID,
+          title: "Cash",
+          isCash: true,
+          _kind: "cash",
+        };
       }
 
       const exp = expenseMap.get(key);
@@ -1362,6 +1443,7 @@ export const BankAccountReport = async (req, res, next) => {
     });
   } catch (err) {
     console.error("BankAccountReport error:", err);
+
     return res.status(500).json({
       error: "Internal Server Error",
       status: false,

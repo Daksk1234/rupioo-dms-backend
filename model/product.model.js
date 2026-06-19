@@ -103,6 +103,11 @@ const ProductSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    openingFinancialYear: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     Opening_Stock: {
       type: Number,
     },
@@ -129,6 +134,6 @@ const ProductSchema = new mongoose.Schema(
       default: null, // e.g. "#75fa8e", "#d9614c", etc.
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 export const Product = mongoose.model("product", ProductSchema);

@@ -33,7 +33,6 @@ export const purchaseOrder = async (req, res, next) => {
 
     // ✅ ensure db context on body
     req.body.userId = user._id;
-    req.body.database = user.database;
 
     // ✅ NEW: PO number = completed count + 2 (scoped to this database)
     const completedCount = await PurchaseOrder.countDocuments({
@@ -78,6 +77,14 @@ export const purchaseInvoiceOrder = async (req, res, next) => {
         .status(404)
         .json({ message: "Party not found", status: false });
     }
+
+    const fyDate = new Date(req.body.date || new Date());
+    const fyMonth = fyDate.getMonth() + 1;
+    const fyYear = fyDate.getFullYear();
+    const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+    req.body.financialYear =
+      req.body.financialYear ||
+      `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
 
     // 🔒 Normalize/guard new bill-level fields (don’t fail if missing)
     // Frontend now sends these; keep defaults if not provided
@@ -130,7 +137,7 @@ export const purchaseInvoiceOrder = async (req, res, next) => {
 
         if (group.length > 0) {
           const maxDiscount = group.reduce((max, g) =>
-            g.discount > max.discount ? g : max
+            g.discount > max.discount ? g : max,
           );
           groupDiscount = maxDiscount.discount;
         }
@@ -177,7 +184,7 @@ export const purchaseInvoiceOrder = async (req, res, next) => {
           product,
           product.warehouse,
           orderItem,
-          req.body.date
+          req.body.date,
         );
         await product.save();
       }
@@ -197,7 +204,6 @@ export const purchaseInvoiceOrder = async (req, res, next) => {
 
     // ---------- Create order ----------
     req.body.userId = user._id;
-    req.body.database = user.database;
 
     const order = await PurchaseOrder.create(req.body);
     if (order) {
@@ -233,7 +239,7 @@ export const UpdatePurchaseInvoiceOrder = async (req, res, next) => {
       const order = await PurchaseOrder.findByIdAndUpdate(
         req.params.orderId,
         req.body,
-        { new: true }
+        { new: true },
       );
       return order
         ? res.status(200).json({ orderDetail: order, status: true })
@@ -387,21 +393,21 @@ export const updatePurchaseOrder = async (req, res, next) => {
     const oldItems = order.orderItems || [];
     const newItems = updatedFields.orderItems || [];
     const oldMap = new Map(
-      oldItems.map((item) => [item.productId.toString(), item])
+      oldItems.map((item) => [item.productId.toString(), item]),
     );
     const newMap = new Map(
-      newItems.map((item) => [item.productId.toString(), item])
+      newItems.map((item) => [item.productId.toString(), item]),
     );
 
     const removedItems = oldItems.filter(
-      (item) => !newMap.has(item.productId.toString())
+      (item) => !newMap.has(item.productId.toString()),
     );
     const addedItems = newItems.filter(
-      (item) => !oldMap.has(item.productId.toString())
+      (item) => !oldMap.has(item.productId.toString()),
     );
 
     const updatedItems = newItems.filter((item) =>
-      oldMap.has(item.productId.toString())
+      oldMap.has(item.productId.toString()),
     );
 
     const isCompleted = order.status === "completed";
@@ -421,7 +427,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => p.productId.toString() === oldItem.productId.toString()
+            (p) => p.productId.toString() === oldItem.productId.toString(),
           );
           if (whItem) {
             whItem.currentStock += oldItem.qty;
@@ -432,7 +438,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => p.productId.toString() === oldItem.productId.toString()
+            (p) => p.productId.toString() === oldItem.productId.toString(),
           );
           if (sItem) {
             sItem.currentStock += oldItem.qty;
@@ -447,7 +453,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => p.productId.toString() === oldItem.productId.toString()
+            (p) => p.productId.toString() === oldItem.productId.toString(),
           );
           if (whItem) {
             whItem.currentStock += oldItem.qty;
@@ -457,7 +463,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => p.productId.toString() === oldItem.productId.toString()
+            (p) => p.productId.toString() === oldItem.productId.toString(),
           );
           if (sItem) {
             // sItem.pendingStock -= oldItem.qty;
@@ -487,7 +493,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           if (whItem) {
             whItem.currentStock -= newItem.qty;
@@ -499,7 +505,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           if (sItem) {
             sItem.currentStock -= newItem.qty;
@@ -514,7 +520,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           if (whItem) {
             whItem.currentStock -= newItem.qty;
@@ -524,7 +530,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           if (sItem) {
             // sItem.pendingStock += newItem.qty;
@@ -562,7 +568,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           // console.log("whItem",whItem)
           if (whItem) {
@@ -575,7 +581,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (stock) {
           const sItem = stock.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           // console.log("sItem",sItem)
           if (sItem) {
@@ -592,7 +598,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
 
         if (warehouse) {
           const whItem = warehouse.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           if (whItem) {
             whItem.currentStock -= qtyChange;
@@ -603,7 +609,7 @@ export const updatePurchaseOrder = async (req, res, next) => {
         if (stock) {
           // console.log("stock",stock)
           const sItem = stock.productItems.find(
-            (p) => p.productId.toString() === newItem.productId.toString()
+            (p) => p.productId.toString() === newItem.productId.toString(),
           );
           // console.log("sitem",sItem)
           if (sItem) {
@@ -798,14 +804,14 @@ export const deletedPurchase = async (req, res, next) => {
         } else {
           orderItem.price = previousPurchaseOrders[0].orderItems.find(
             (item) =>
-              item.productId.toString() === orderItem.productId.toString()
+              item.productId.toString() === orderItem.productId.toString(),
           ).price;
         }
 
         await DeleteStockPurchase(
           orderItem,
           purchase.date,
-          previousPurchaseOrders
+          previousPurchaseOrders,
         );
       } else {
         console.log("Product Id Not Found");
@@ -837,7 +843,7 @@ export const deleteAddProductInWarehouse = async (warehouse, warehouseId) => {
       // return console.log("warehouse not found");
     }
     const sourceProductItem = user.productItems.find(
-      (pItem) => pItem.productId.toString() === warehouse.productId.toString()
+      (pItem) => pItem.productId.toString() === warehouse.productId.toString(),
     );
 
     if (sourceProductItem) {
@@ -1001,11 +1007,11 @@ export const CreditorCalculate = async (req, res, next) => {
     // Calculate totals
     Creditor.totalPurchase = purchase.reduce(
       (sum, item) => sum + item.grandTotal,
-      0
+      0,
     );
     Creditor.currentPurchase = purchaseCurrentMonth.reduce(
       (sum, item) => sum + item.grandTotal,
-      0
+      0,
     );
     Creditor.totalPaid = receipt.reduce((sum, item) => sum + item.amount, 0);
     Creditor.currentPaid = receipts.reduce((sum, item) => sum + item.amount, 0);
@@ -1152,7 +1158,7 @@ export const DeleteStockPurchase = async (orderItem, date, orderData) => {
         productItem.currentStock === 0
       ) {
         stock.productItems = stock.productItems.filter(
-          (item) => item.productId.toString() !== orderItem.productId
+          (item) => item.productId.toString() !== orderItem.productId,
         );
         await stock.save();
         break;
@@ -1224,15 +1230,15 @@ export const sendPurchaseOrderMail = async (req, res) => {
               ${it?.productData?.Product_Title || it?.productName || "-"}
             </td>
             <td style="padding:6px;border:1px solid #e5e7eb;text-align:right">${Number(
-              it?.qty ?? 0
+              it?.qty ?? 0,
             )}</td>
             <td style="padding:6px;border:1px solid #e5e7eb;text-align:right">${Number(
-              it?.price || it?.basicPrice || 0
+              it?.price || it?.basicPrice || 0,
             ).toFixed(2)}</td>
             <td style="padding:6px;border:1px solid #e5e7eb;text-align:right">${Number(
-              it?.taxableAmount || 0
+              it?.taxableAmount || 0,
             ).toFixed(2)}</td>
-          </tr>`
+          </tr>`,
       )
       .join("");
 
@@ -1242,11 +1248,11 @@ export const sendPurchaseOrderMail = async (req, res) => {
         <p>
           <b>PO No:</b> ${order.poNumber || order.invoiceId || "-"}<br/>
           <b>Date:</b> ${new Date(order.date || order.createdAt).toLocaleString(
-            "en-IN"
+            "en-IN",
           )}<br/>
           <b>Party:</b> ${order.fullName || "-"}<br/>
           <b>Total:</b> ₹${Number(
-            order.grandTotal || order.amount || 0
+            order.grandTotal || order.amount || 0,
           ).toFixed(2)}
         </p>
         <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;width:100%;max-width:760px">

@@ -6,6 +6,36 @@ import { PurchaseOrder } from "../model/purchaseOrder.model.js";
 import { CustomerGroup } from "../model/customerGroup.model.js";
 import { Stock } from "../model/stock.js";
 
+const normalizeFinancialYear = (value) => {
+  const raw = String(value || "").trim();
+
+  const match = raw.match(/^(\d{4})\s*-\s*(\d{2}|\d{4})$/);
+  if (!match) return raw;
+
+  const startYear = match[1];
+  const endYear = match[2].length === 4 ? match[2].slice(-2) : match[2];
+
+  return `${startYear}-${endYear}`;
+};
+
+const applyOpeningFinancialYear = (body = {}) => {
+  const fy = body.openingFinancialYear || body.financialYear;
+
+  if (fy) {
+    body.openingFinancialYear = normalizeFinancialYear(fy);
+  }
+
+  // ✅ remove extra frontend FY field so only openingFinancialYear is saved
+  delete body.financialYear;
+  delete body.financialYearOpeningStock;
+  delete body.financialYearOpeningRate;
+  delete body.openingStockByFY;
+  delete body.openingStocks;
+  delete body.financialYearOpenings;
+
+  return body;
+};
+
 export const SaveProduct = async (req, res) => {
   try {
     let groupDiscount = 0;
@@ -60,6 +90,7 @@ export const SaveProduct = async (req, res) => {
       // last4 = hsn.slice(-4);
       req.body.sId = `${req.body.category}-${req.body.SubCategory}-${req.body.Product_Title}`;
     }
+    req.body = applyOpeningFinancialYear(req.body);
     const product = await Product.create(req.body);
     await addProductInWarehouse1(req.body, product.warehouse, product);
     // await addProductInStock(req.body, product.warehouse, product)
@@ -235,6 +266,7 @@ export const UpdateProduct = async (req, res, next) => {
         // last4 = hsn.slice(-4);
         req.body.sId = `${req.body.category}-${req.body.SubCategory}-${req.body.Product_Title}`;
       }
+      req.body = applyOpeningFinancialYear(req.body);
       const updatedProduct = req.body;
       const product = await Product.findByIdAndUpdate(
         productId,

@@ -130,6 +130,11 @@ const CustomerSchema = new mongoose.Schema(
     comPanNo: {
       type: String,
     },
+    openingFinancialYear: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     contactNumber: {
       type: Number,
     },
@@ -230,7 +235,7 @@ const CustomerSchema = new mongoose.Schema(
       default: 0,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const Customer = mongoose.model("customer", CustomerSchema);

@@ -29,7 +29,7 @@ export const SignIn = async (req, res, next) => {
     if (warehouse) {
       const token = Jwt.sign(
         { subject: Username },
-        process.env.TOKEN_SECRET_KEY
+        process.env.TOKEN_SECRET_KEY,
       );
       return res.status(200).json({
         message: "Warehouse SignIn Successfull!",
@@ -105,7 +105,7 @@ export const ViewWarehouseForProduct = async (req, res, next) => {
     let warehouse = await Warehouse.find({
       database: req.params.database,
       status: "Active",
-      assignStatus: true,
+      assignStatus: false,
     })
       .sort({ sortorder: -1 })
       .populate({ path: "productItems.productId", model: "product" })
@@ -304,7 +304,7 @@ export const warehouseProductItem = async (body, lastStock) => {
   for (let id of body.productItems) {
     if (body._id.toString() === lastStock.warehouseId.toString()) {
       const stock = lastStock.productItems.find(
-        (item) => item.productId.toString() === id?.productId?._id.toString()
+        (item) => item.productId.toString() === id?.productId?._id.toString(),
       );
       if (stock) {
         matchingStocks[id._id] = {
@@ -381,7 +381,7 @@ export const warehouseProductItem1 = async (body, lastStock) => {
   let matchingStocks = {};
   for (let id of body) {
     const stock = lastStock.find(
-      (item) => item.productId._id.toString() === id?.productId?._id.toString()
+      (item) => item.productId._id.toString() === id?.productId?._id.toString(),
     );
     // console.log(stock)
     if (stock) {
@@ -609,24 +609,24 @@ export const ViewOverDueStock = async (body) => {
     }).distinct("orderItems");
     if (orderedProductsLastMonth.length > 0) {
       const orderedProductIdsLastMonth = orderedProductsLastMonth.map(
-        (orderItem) => orderItem.productId.toString()
+        (orderItem) => orderItem.productId.toString(),
       );
       const productsToProcess = productsNotOrderedLastMonth.filter(
         (product) =>
-          !orderedProductIdsLastMonth.includes(product._id.toString())
+          !orderedProductIdsLastMonth.includes(product._id.toString()),
       );
       const warehouseIds = productsToProcess.map(
-        (product) => product.warehouse
+        (product) => product.warehouse,
       );
       const warehouses = await Warehouse.find({ _id: { $in: warehouseIds } });
       const allProduct = productsToProcess.map((product) => {
         const warehouse = warehouses.find(
           (warehouse) =>
-            warehouse._id.toString() === product.warehouse.toString()
+            warehouse._id.toString() === product.warehouse.toString(),
         );
         const qty = warehouse
           ? warehouse.productItems.find(
-              (item) => item.productId.toString() === product._id.toString()
+              (item) => item.productId.toString() === product._id.toString(),
             )
           : null;
         console.log(qty.currentStock);
@@ -869,7 +869,7 @@ export const updatePassword = async (request, response, next) => {
       const user = await Warehouse.updateMany(
         { _id: userId },
         { Password: request.body.Password },
-        { new: true }
+        { new: true },
       );
       if (user.modifiedCount > 0)
         return response

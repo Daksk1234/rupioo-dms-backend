@@ -103,6 +103,10 @@ const createOrderSchema = new mongoose.Schema(
     database: {
       type: String,
     },
+    financialYear: {
+      type: String,
+      default: "",
+    },
     partyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "customer",
@@ -395,6 +399,18 @@ const createOrderSchema = new mongoose.Schema(
     },
     utrNumber: {
       type: String,
+    },
+    accountNumber: {
+      type: String,
+      default: "",
+    },
+    bankDetails: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    bankIFSC: {
+      type: String,
+      default: "",
     },
     paymentDetails: {
       type: Object,

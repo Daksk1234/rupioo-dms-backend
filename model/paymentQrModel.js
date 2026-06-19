@@ -35,6 +35,22 @@ const paymentQrSchema = new mongoose.Schema(
     database: {
       type: String,
     },
+    accountNumber: {
+      type: String,
+      default: "",
+    },
+    financialYear: {
+      type: String,
+      default: "",
+    },
+    bankIFSC: {
+      type: String,
+      default: "",
+    },
+    bankDetails: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
   },
   { timestamps: true },
 );

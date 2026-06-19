@@ -90,6 +90,35 @@ import salesPersonTargetRoutes from "./routes/salesPersonTarget.route.js";
 import hierarchyWiseTargetRoutes from "./routes/hierarchyWiseTargetRoutes.js";
 import companySalesTargetRoutes from "./routes/companySalesTargetRoutes.route.js";
 import companyTargetRoutes from "./routes/companyTarget.route.js";
+import yearlyTargetRoutes from "./routes/yearlyTarget.routes.js";
+// import hrmFaceRoutes from "./routes/hrmFace.routes.js";
+// import hrmAttendanceScheduleRouter from "./routes/hrmAttendanceSchedule.route.js";
+import hrmFaceRouter from "./routes/hrmFace.routes.js";
+import hrmShiftRouter from "./routes/hrmShift.routes.js";
+import hrmHalfDayRouter from "./routes/hrmHalfDay.routes.js";
+import hrmAttendanceRouter from "./routes/hrmAttendance.routes.js";
+import hrmSettingsRouter from "./routes/hrmSettings.routes.js";
+import hrmLeaveRouter from "./routes/hrmLeave.routes.js";
+import hrmAttendanceCorrectionRouter from "./routes/hrmAttendanceCorrection.routes.js";
+
+// ✅ NEW HRM ADVANCED ROUTES
+import hrmEmployeeRouter from "./routes/hrmEmployee.routes.js";
+import hrmHolidayRouter from "./routes/hrmHoliday.routes.js";
+import hrmRecruitmentRouter from "./routes/hrmRecruitment.routes.js";
+import hrmOnlineTestRouter from "./routes/hrmOnlineTest.routes.js";
+import hrmInterviewRouter from "./routes/hrmInterview.routes.js";
+import hrmOfferRouter from "./routes/hrmOffer.routes.js";
+import hrmJoiningRouter from "./routes/hrmJoining.routes.js";
+import hrmPerformanceRouter from "./routes/hrmPerformance.routes.js";
+import hrmFieldTrackingRouter from "./routes/hrmFieldTracking.routes.js";
+import hrmExpenseRouter from "./routes/hrmExpense.routes.js";
+import hrmNotificationRouter from "./routes/hrmNotification.routes.js";
+import hrmPermissionRouter from "./routes/hrmPermission.routes.js";
+import hrmAuditRouter from "./routes/hrmAudit.routes.js";
+import hrmLoanAdvanceRouter from "./routes/hrmLoanAdvance.route.js";
+import leaveRoutes from "./routes/leave.routes.js";
+import expenseRoutes from "./routes/expense.route.js";
+
 // import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
 app.use(cors());
@@ -200,6 +229,34 @@ app.use("/activity-logs", activityLoggerRoute);
 app.use("/devices", deviceRoutes);
 app.use("/salesperson-target", salesPersonTargetRoutes);
 app.use("/target", companyTargetRoutes);
+app.use("/target/yearly-target", yearlyTargetRoutes);
+app.use("/hrm-face", hrmFaceRouter);
+app.use("/hrm-shift", hrmShiftRouter);
+app.use("/hrm-half-day", hrmHalfDayRouter);
+app.use("/hrm-attendance", hrmAttendanceRouter);
+app.use("/hrm-settings", hrmSettingsRouter);
+app.use("/hrm-leave", hrmLeaveRouter);
+app.use("/hrm-attendance-correction", hrmAttendanceCorrectionRouter);
+
+// ✅ NEW HRM ADVANCED MODULE ROUTES
+app.use("/hrm-employee", hrmEmployeeRouter);
+app.use("/hrm-holiday", hrmHolidayRouter);
+app.use("/hrm-recruitment", hrmRecruitmentRouter);
+app.use("/hrm-online-test", hrmOnlineTestRouter);
+app.use("/hrm-interview", hrmInterviewRouter);
+app.use("/hrm-offer", hrmOfferRouter);
+app.use("/hrm-joining", hrmJoiningRouter);
+app.use("/hrm-performance", hrmPerformanceRouter);
+app.use("/hrm-field-tracking", hrmFieldTrackingRouter);
+app.use("/hrm-expense", hrmExpenseRouter);
+app.use("/hrm-notification", hrmNotificationRouter);
+app.use("/hrm-permission", hrmPermissionRouter);
+app.use("/hrm-audit", hrmAuditRouter);
+app.use("/api/hrm-loan-advances", hrmLoanAdvanceRouter);
+app.use("/leave", leaveRoutes);
+
+app.use("/expense", expenseRoutes);
+
 mongoose
   .connect(process.env.DATABASE_URL, {
     useUnifiedTopology: true,

@@ -33,7 +33,7 @@ const router = express.Router();
 router.post(
   "/save-target-creation",
   uploads.single("file"),
-  SaveTargetCreation
+  SaveTargetCreation,
 );
 // router.post("/save-target-creation", SaveTargetCreation);
 router.get("/view-target-creation/:id/:database", ViewTargetCreation);
@@ -52,7 +52,7 @@ router.post("/target-achievement/:database", latestAchievement);
 router.post("/target-achievement-party/:id/:database", latestAchievementById);
 router.post(
   "/target-achievement-sales-person/:id/:database",
-  latestAchievementSalesById
+  latestAchievementSalesById,
 );
 router.post("/achievements/:id/:database", called);
 // router.post("/test", yes)
@@ -71,6 +71,6 @@ router.post("/targets/salesperson/fy-summary", fySummaryForSalesperson);
 router.post("/targets/salesperson/month-metrics", monthMetricsForSalesperson);
 router.post(
   "/targets/salesperson/product-breakdown",
-  productBreakdownForSalesperson
+  productBreakdownForSalesperson,
 );
 export default router;

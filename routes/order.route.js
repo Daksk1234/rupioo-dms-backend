@@ -33,6 +33,7 @@ import {
   verifyFinalPayment,
   verifyPaymentMode,
   verifyQrPayment,
+  getCreateOrderGstBucketsByDatabase,
 } from "../controller/order.controller.js";
 
 const router = express.Router();
@@ -52,6 +53,10 @@ router.post("/save-create-order", createOrder);
 router.post("/save-sales-invoice-order", createOrderWithInvoice);
 router.get("/view-create-order-history/:id", createOrderHistory);
 router.get("/view-create-order-history-gstr1/:id", createOrderGstBuckets);
+router.get(
+  "/view-create-order-history-database/:database",
+  getCreateOrderGstBucketsByDatabase,
+);
 router.get("/view-create-order-history-by-id/:id", createOrderHistoryByUserId);
 router.delete("/delete-sales-order/:id", deleteSalesOrder);
 router.get("/view-sales-by-id/:id", createOrderHistoryByPartyId);

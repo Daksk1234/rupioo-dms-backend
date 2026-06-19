@@ -274,8 +274,16 @@ const UserSchema = new mongoose.Schema(
     upi_id: {
       type: String,
     },
+    financialYears: {
+      type: [String],
+    },
+    openingFinancialYear: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const User = mongoose.model("user", UserSchema);

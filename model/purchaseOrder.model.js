@@ -41,7 +41,7 @@ const orderItemsSchema = new mongoose.Schema(
     ReceiveQty: { type: String },
     DamageQty: { type: String },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 /* -------- Bill-level Discount/Charge row schema (applied) -------- */
@@ -55,7 +55,7 @@ const adjustmentRowSchema = new mongoose.Schema(
     amount: Number, // absolute amount (if amount)
     appliedAmount: Number, // what was actually applied on this bill
   },
-  { _id: false }
+  { _id: false },
 );
 
 /* -------- Optional compact HSN summary persisted for audit -------- */
@@ -69,7 +69,7 @@ const hsnSummaryRowSchema = new mongoose.Schema(
     igst: Number,
     total: Number,
   },
-  { _id: false }
+  { _id: false },
 );
 
 const hsnSummarySchema = new mongoose.Schema(
@@ -77,7 +77,7 @@ const hsnSummarySchema = new mongoose.Schema(
     isIGST: Boolean,
     rows: [hsnSummaryRowSchema],
   },
-  { _id: false }
+  { _id: false },
 );
 
 /* -------- Purchase Order schema -------- */
@@ -96,6 +96,10 @@ const PurchaseOrderSchema = new mongoose.Schema(
     maxGstPercentage: { type: Number },
 
     database: { type: String },
+    financialYear: {
+      type: String,
+      default: "",
+    },
     invoiceId: { type: String },
     date: { type: Date },
     poNumber: { type: String },
@@ -172,10 +176,10 @@ const PurchaseOrderSchema = new mongoose.Schema(
     // ✅ NEW: compact HSN summary (optional)
     hsnSummary: { type: hsnSummarySchema, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const PurchaseOrder = mongoose.model(
   "purchaseOrder",
-  PurchaseOrderSchema
+  PurchaseOrderSchema,
 );
