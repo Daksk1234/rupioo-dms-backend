@@ -118,6 +118,9 @@ import hrmAuditRouter from "./routes/hrmAudit.routes.js";
 import hrmLoanAdvanceRouter from "./routes/hrmLoanAdvance.route.js";
 import leaveRoutes from "./routes/leave.routes.js";
 import expenseRoutes from "./routes/expense.route.js";
+import hrmEmployeesAppRoutes from "./routes/hrmEmployeesApp.routes.js";
+import hrmVisitorsAppRoutes from "./routes/hrmVisitorsApp.routes.js";
+import supportCodeRoutes from "./routes/supportCode.route.js";
 
 // import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
@@ -254,8 +257,10 @@ app.use("/hrm-permission", hrmPermissionRouter);
 app.use("/hrm-audit", hrmAuditRouter);
 app.use("/api/hrm-loan-advances", hrmLoanAdvanceRouter);
 app.use("/leave", leaveRoutes);
-
 app.use("/expense", expenseRoutes);
+app.use("/api/hrm-employees-app", hrmEmployeesAppRoutes);
+app.use("/api/hrm-visitors-app", hrmVisitorsAppRoutes);
+app.use("/api/support-code", supportCodeRoutes);
 
 mongoose
   .connect(process.env.DATABASE_URL, {

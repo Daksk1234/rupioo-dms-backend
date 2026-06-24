@@ -282,6 +282,10 @@ const UserSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    isHRM: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

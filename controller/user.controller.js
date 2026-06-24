@@ -529,6 +529,14 @@ export const SaveUser = async (req, res, next) => {
       );
     }
 
+    if (req.body.isHRM !== undefined) {
+      req.body.isHRM =
+        req.body.isHRM === true ||
+        req.body.isHRM === "true" ||
+        req.body.isHRM === "on";
+    } else {
+      req.body.isHRM = false;
+    }
     const user = await User.create(req.body);
 
     if (req.body.warehouse) {

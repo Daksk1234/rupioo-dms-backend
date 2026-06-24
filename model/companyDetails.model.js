@@ -173,8 +173,12 @@ const CompanySchema = new mongoose.Schema(
     financialYears: {
       type: [String],
     },
+    isHRM: {
+      type: Boolean,
+    },
   },
   { timestamps: true },
 );
 
-export const CompanyDetails = mongoose.model("companyDetail", CompanySchema);
+export const CompanyDetails = mongoose.mode;
+("companyDetail", CompanySchema);
