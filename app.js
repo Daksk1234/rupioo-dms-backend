@@ -5,12 +5,6 @@ import path from "path";
 import fs from "fs";
 import cron from "node-cron";
 import { fileURLToPath } from "url";
-import mongoose from "mongoose";
-import cors from "cors";
-import http from "http";
-import { Server } from "socket.io";
-import { v4 as uuidv4 } from "uuid";
-
 import UserRouter from "./routes/user.route.js";
 import CustomerRouter from "./routes/customer.route.js";
 import RoleRouter from "./routes/role.route.js";
@@ -47,7 +41,7 @@ import BankRouter from "./routes/bankDetail.route.js";
 import QuotationRoute from "./routes/quotation.route.js";
 import SubscriptionRouter from "./routes/subscription.route.js";
 import CreateAccountRouter from "./routes/createAccount.route.js";
-
+//------------------------------------------------------------------
 import CreateJobRouter from "./routes/createJob.route.js";
 import JobAppliedRouter from "./routes/jobApplied.route.js";
 import InterviewRouter from "./routes/interview.route.js";
@@ -87,7 +81,8 @@ import ChallanRouter from "./routes/challan.route.js";
 import CombinedTargetRouter from "./routes/combinedTarget.route.js";
 import activityLoggerRoute from "./routes/activityLogger.route.js";
 import activityLogger from "./middleware/activityLogger.js";
-
+import mongoose from "mongoose";
+import cors from "cors";
 import { increasePercentage } from "./controller/targetCreation.controller.js";
 import customerCheckRouter from "./routes/customerCheck.route.js";
 import deviceRoutes from "./routes/device.routes.js";
@@ -96,7 +91,8 @@ import hierarchyWiseTargetRoutes from "./routes/hierarchyWiseTargetRoutes.js";
 import companySalesTargetRoutes from "./routes/companySalesTargetRoutes.route.js";
 import companyTargetRoutes from "./routes/companyTarget.route.js";
 import yearlyTargetRoutes from "./routes/yearlyTarget.routes.js";
-
+// import hrmFaceRoutes from "./routes/hrmFace.routes.js";
+// import hrmAttendanceScheduleRouter from "./routes/hrmAttendanceSchedule.route.js";
 import hrmFaceRouter from "./routes/hrmFace.routes.js";
 import hrmShiftRouter from "./routes/hrmShift.routes.js";
 import hrmHalfDayRouter from "./routes/hrmHalfDay.routes.js";
@@ -105,6 +101,7 @@ import hrmSettingsRouter from "./routes/hrmSettings.routes.js";
 import hrmLeaveRouter from "./routes/hrmLeave.routes.js";
 import hrmAttendanceCorrectionRouter from "./routes/hrmAttendanceCorrection.routes.js";
 
+// ✅ NEW HRM ADVANCED ROUTES
 import hrmEmployeeRouter from "./routes/hrmEmployee.routes.js";
 import hrmHolidayRouter from "./routes/hrmHoliday.routes.js";
 import hrmRecruitmentRouter from "./routes/hrmRecruitment.routes.js";
@@ -125,31 +122,29 @@ import hrmEmployeesAppRoutes from "./routes/hrmEmployeesApp.routes.js";
 import hrmVisitorsAppRoutes from "./routes/hrmVisitorsApp.routes.js";
 import supportCodeRoutes from "./routes/supportCode.route.js";
 
-dotenv.config();
-
+// import { StockClose } from "./controller/warehouse.controller.js";
 const app = express();
-
 app.use(cors());
+dotenv.config();
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: true }));
 app.use(bodyParser.json({ limit: "50mb" }));
-
 const publicPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "public",
 );
-
 const publicPath1 = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "controller",
 );
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
+// const publicPath = path.join(__dirname, "public");
 
 app.use(express.static(publicPath));
 app.use(express.static(publicPath1));
-
 app.get("/", (req, res) => {
   res.send("Hello World!");
 });
-
 app.get("/process", (req, res) => {
   res.send("server running!");
   process.exit();
@@ -193,7 +188,7 @@ app.use("/bank", BankRouter);
 app.use("/quotation", QuotationRoute);
 app.use("/subscription", SubscriptionRouter);
 app.use("/expenses", CreateAccountRouter);
-
+//---------------------------------------------
 app.use("/create-job", CreateJobRouter);
 app.use("/job-applied", JobAppliedRouter);
 app.use("/interview", InterviewRouter);
@@ -232,9 +227,7 @@ app.use("/visitpoint", VisitPointRouter);
 app.use("/groups", GroupRouter);
 app.use("/challans", ChallanRouter);
 app.use("/combined-targets", CombinedTargetRouter);
-
 app.use(activityLogger());
-
 app.use("/activity-logs", activityLoggerRoute);
 app.use("/devices", deviceRoutes);
 app.use("/salesperson-target", salesPersonTargetRoutes);
@@ -248,6 +241,7 @@ app.use("/hrm-settings", hrmSettingsRouter);
 app.use("/hrm-leave", hrmLeaveRouter);
 app.use("/hrm-attendance-correction", hrmAttendanceCorrectionRouter);
 
+// ✅ NEW HRM ADVANCED MODULE ROUTES
 app.use("/hrm-employee", hrmEmployeeRouter);
 app.use("/hrm-holiday", hrmHolidayRouter);
 app.use("/hrm-recruitment", hrmRecruitmentRouter);
@@ -280,19 +274,18 @@ mongoose
     console.log(error);
   });
 
+//------------------------------------------------------------------------------
 cron.schedule("0 20 * * *", () => {
   // ViewAllWarehouse()
   // closingStockUpdated();
   // StockClose()
 });
-
 cron.schedule("1 0 1 * *", () => {
   increasePercentage();
 });
 
 app.post("/checkfile", (req, res) => {
   const filePath = path.join(publicPath1, req.body.fileName);
-
   fs.unlink(filePath, (err) => {
     if (err) {
       console.error(err);
@@ -300,14 +293,17 @@ app.post("/checkfile", (req, res) => {
         .status(500)
         .json({ message: "file", error: err, status: false });
     }
-
     res.status(200).json({ message: "File", status: true });
   });
 });
 
 //------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 // SOCKET + WEBRTC SUPPORT SIGNALING
 //------------------------------------------------------------------------------
+import { Server } from "socket.io";
+import http from "http";
+import { v4 as uuidv4 } from "uuid";
 
 const server = http.createServer(app);
 
@@ -318,8 +314,61 @@ const io = new Server(server, {
   },
 });
 
+const supportRooms = new Map();
+
 const getSupportRoom = (code) => {
   return `support:${String(code || "").trim()}`;
+};
+
+const getSupportRoomState = (code) => {
+  const cleanCode = String(code || "").trim();
+
+  if (!supportRooms.has(cleanCode)) {
+    supportRooms.set(cleanCode, {
+      appSocketId: null,
+      appDatabase: "",
+      webSocketIds: new Set(),
+    });
+  }
+
+  return supportRooms.get(cleanCode);
+};
+
+const cleanupSupportSocket = (socket) => {
+  const code = socket.data.supportCode;
+  const role = socket.data.supportRole;
+
+  if (!code) return;
+
+  const state = supportRooms.get(code);
+  const room = getSupportRoom(code);
+
+  if (state) {
+    if (role === "app" && state.appSocketId === socket.id) {
+      state.appSocketId = null;
+      state.appDatabase = "";
+
+      socket.to(room).emit("support:user-disconnected", {
+        code,
+        role: "app",
+        message: "App disconnected",
+      });
+    }
+
+    if (role === "web") {
+      state.webSocketIds.delete(socket.id);
+
+      socket.to(room).emit("support:user-disconnected", {
+        code,
+        role: "web",
+        message: "Website disconnected",
+      });
+    }
+
+    if (!state.appSocketId && state.webSocketIds.size === 0) {
+      supportRooms.delete(code);
+    }
+  }
 };
 
 io.on("connection", (socket) => {
@@ -351,8 +400,12 @@ io.on("connection", (socket) => {
 
     const cleanCode = String(code).trim();
     const room = getSupportRoom(cleanCode);
+    const state = getSupportRoomState(cleanCode);
 
     socket.join(room);
+
+    state.appSocketId = socket.id;
+    state.appDatabase = database || "";
 
     socket.data.supportCode = cleanCode;
     socket.data.supportRole = "app";
@@ -366,11 +419,19 @@ io.on("connection", (socket) => {
       message: "App joined support room",
     });
 
-    socket.to(room).emit("support:app-online", {
+    io.to(room).emit("support:app-online", {
       code: cleanCode,
       database: database || "",
       message: "App is online",
     });
+
+    // If website is already waiting, immediately ask app to start WebRTC.
+    if (state.webSocketIds.size > 0) {
+      socket.emit("support:web-ready", {
+        code: cleanCode,
+        message: "Website is ready for WebRTC",
+      });
+    }
 
     console.log("Support app joined:", room);
   });
@@ -380,8 +441,11 @@ io.on("connection", (socket) => {
 
     const cleanCode = String(code).trim();
     const room = getSupportRoom(cleanCode);
+    const state = getSupportRoomState(cleanCode);
 
     socket.join(room);
+
+    state.webSocketIds.add(socket.id);
 
     socket.data.supportCode = cleanCode;
     socket.data.supportRole = "web";
@@ -395,10 +459,23 @@ io.on("connection", (socket) => {
       message: "Website joined support room",
     });
 
+    if (state.appSocketId) {
+      socket.emit("support:app-online", {
+        code: cleanCode,
+        database: state.appDatabase || "",
+        message: "App is online",
+      });
+    }
+
     socket.to(room).emit("support:web-online", {
       code: cleanCode,
       database: database || "",
       message: "Website is online",
+    });
+
+    socket.to(room).emit("support:web-ready", {
+      code: cleanCode,
+      message: "Website is ready for WebRTC",
     });
 
     console.log("Support website joined:", room);
@@ -496,23 +573,13 @@ io.on("connection", (socket) => {
       message: "Support session ended",
     });
 
+    supportRooms.delete(cleanCode);
+
     console.log("Support session ended:", room);
   });
 
   socket.on("disconnect", () => {
-    const code = socket.data.supportCode;
-    const role = socket.data.supportRole;
-
-    if (code) {
-      const room = getSupportRoom(code);
-
-      socket.to(room).emit("support:user-disconnected", {
-        code,
-        role,
-        message: `${role || "User"} disconnected`,
-      });
-    }
-
+    cleanupSupportSocket(socket);
     console.log("Socket disconnected:", socket.id);
   });
 });
