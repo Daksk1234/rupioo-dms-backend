@@ -1,3 +1,5 @@
+// File: controller/supportCode.controller.js
+
 import SupportCode from "../model/supportCode.model.js";
 
 const generateSixDigitCode = () => {
@@ -27,34 +29,36 @@ export const generateSupportCode = async (req, res) => {
       });
     }
 
-    const existingCode = await SupportCode.findOne({ database });
+    const cleanDatabase = database.toString().trim();
 
-    if (existingCode) {
-      return res.status(200).json({
-        status: true,
-        message: "Support code already generated",
-        database: existingCode.database,
-        code: existingCode.code,
-        existing: true,
+    if (!cleanDatabase) {
+      return res.status(400).json({
+        status: false,
+        message: "Database is required",
       });
     }
+
+    // Important:
+    // Remove old support code of this database so every generate request creates a fresh code.
+    await SupportCode.deleteMany({ database: cleanDatabase });
 
     const code = await generateUniqueSupportCode();
 
     const supportCode = await SupportCode.create({
-      database,
+      database: cleanDatabase,
       code,
     });
 
     return res.status(201).json({
       status: true,
-      message: "Support code generated successfully",
+      message: "New support code generated successfully",
       database: supportCode.database,
       code: supportCode.code,
       existing: false,
     });
   } catch (error) {
     console.error("Generate support code error:", error);
+
     return res.status(500).json({
       status: false,
       message: "Internal server error",
@@ -95,6 +99,7 @@ export const verifySupportCode = async (req, res) => {
     });
   } catch (error) {
     console.error("Verify support code error:", error);
+
     return res.status(500).json({
       status: false,
       connected: false,
