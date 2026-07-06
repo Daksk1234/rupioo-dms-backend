@@ -45,6 +45,13 @@ const hrmFaceSchema = new mongoose.Schema(
       index: true,
     },
 
+    mobileNumber: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
+
     nameSnapshot: {
       type: String,
       trim: true,

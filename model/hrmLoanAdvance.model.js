@@ -295,6 +295,41 @@ const hrmLoanAdvanceSchema = new mongoose.Schema(
       default: "",
     },
 
+    paymentStatus: {
+      type: String,
+      enum: ["Unpaid", "Paid"],
+      default: "Unpaid",
+      index: true,
+    },
+
+    paymentRemark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    paidBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    paidByName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    paidAt: {
+      type: String,
+      default: "",
+    },
+
+    paidOn: {
+      type: String,
+      default: "",
+      index: true,
+    },
+
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       default: null,
@@ -389,6 +424,11 @@ hrmLoanAdvanceSchema.index(
 hrmLoanAdvanceSchema.index(
   { database: 1, deductionStartMonth: 1, status: 1 },
   { name: "hrm_loan_advance_deduction_month_idx" },
+);
+
+hrmLoanAdvanceSchema.index(
+  { database: 1, status: 1, paymentStatus: 1, requestDate: -1 },
+  { name: "hrm_loan_advance_payment_status_idx" },
 );
 
 export const HrmLoanAdvance =

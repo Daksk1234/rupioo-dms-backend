@@ -1,10 +1,17 @@
 // File: controllers/hrmVisitorsApp.controller.js
-
 import HrmVisitorsApp from "../model/hrmVisitorsApp.model.js";
 
 function cleanText(value) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+function normalizeStatus(value, fallback = "Active") {
+  const text = cleanText(value || fallback).toLowerCase();
+
+  if (text === "inactive") return "Inactive";
+  if (text === "deleted") return "Deleted";
+  return "Active";
 }
 
 export const createHrmVisitorApp = async (req, res) => {
@@ -31,7 +38,7 @@ export const createHrmVisitorApp = async (req, res) => {
       mobile: cleanText(mobile),
       address: cleanText(address),
       photoUri: cleanText(photoUri),
-      status: cleanText(status) || "Active",
+      status: normalizeStatus(status, "Active"),
       deleted: false,
     });
 
@@ -62,6 +69,7 @@ export const viewHrmVisitorsApp = async (req, res) => {
     const visitors = await HrmVisitorsApp.find({
       database,
       deleted: { $ne: true },
+      status: { $ne: "Deleted" },
     }).sort({ createdAt: -1 });
 
     return res.status(200).json({
@@ -94,11 +102,17 @@ export const updateHrmVisitorApp = async (req, res) => {
 
     const update = {};
     allowed.forEach((key) => {
-      if (req.body?.[key] !== undefined) update[key] = cleanText(req.body[key]);
+      if (req.body?.[key] !== undefined) {
+        update[key] =
+          key === "status"
+            ? normalizeStatus(req.body[key], "Active")
+            : cleanText(req.body[key]);
+      }
     });
 
     const visitor = await HrmVisitorsApp.findByIdAndUpdate(id, update, {
       new: true,
+      runValidators: true,
     });
 
     if (!visitor) {
@@ -117,6 +131,37 @@ export const updateHrmVisitorApp = async (req, res) => {
     return res.status(500).json({
       status: false,
       message: error?.message || "Unable to update visitor.",
+    });
+  }
+};
+
+export const setHrmVisitorStatusApp = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const status = normalizeStatus(req.body?.status, "Active");
+
+    const visitor = await HrmVisitorsApp.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true, runValidators: true },
+    );
+
+    if (!visitor) {
+      return res
+        .status(404)
+        .json({ status: false, message: "Visitor not found." });
+    }
+
+    return res.status(200).json({
+      status: true,
+      message: `Visitor marked ${status}.`,
+      data: visitor,
+      visitor,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: false,
+      message: error?.message || "Unable to update visitor status.",
     });
   }
 };

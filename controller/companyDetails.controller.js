@@ -78,92 +78,90 @@ const normalizeInvoiceSeriesForSave = (body = {}) => {
   return body;
 };
 
-export const saveCompanyDetails = async (req, res, next) => {
+const safeJsonParse = (value, fallback) => {
   try {
-    const user = await User.findById({ _id: req.body.created_by });
+    if (!value) return fallback;
+    if (typeof value !== "string") return value;
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
 
-    if (!user) {
-      return res.status(400).json({
-        message: "User Not Found",
-        status: false,
-      });
-    }
+export const saveCompanyDetails = async (req, res) => {
+  try {
+    const body = req.body || {};
 
-    req.body.database = user.database;
+    const uploadedFiles = Array.isArray(req.files)
+      ? req.files
+      : req.file
+        ? [req.file]
+        : [];
 
-    if (req.files) {
-      req.files.map((file) => {
-        if (file.fieldname === "signature") {
-          req.body.signature = file.filename;
-        } else if (file.fieldname === "qr_code") {
-          req.body.qr_code = file.filename;
-        } else {
-          req.body.logo = file.filename;
-        }
-      });
-    }
+    const logoFile = uploadedFiles.find((f) => f.fieldname === "file");
+    const signatureFile = uploadedFiles.find(
+      (f) => f.fieldname === "signature",
+    );
+    const qrCodeFile = uploadedFiles.find((f) => f.fieldname === "qr_code");
 
-    if (req.body.bankDetails) {
-      req.body.bankDetails = parseJsonArray(req.body.bankDetails);
-    }
+    const bankDetails = safeJsonParse(body.bankDetails, []);
+    const invoiceSeries = safeJsonParse(body.invoiceSeries, []);
 
-    // New FY-wise Prefix/Suffix save logic
-    req.body = normalizeInvoiceSeriesForSave(req.body);
-
-    const companyDetail = await CompanyDetails.find({
-      database: user.database,
-    }).sort({ sortorder: -1 });
-
-    if (companyDetail.length === 0) {
-      const createdCompanyDetail = await CompanyDetails.create(req.body);
-
-      return createdCompanyDetail
-        ? res.status(200).json({
-            message: "data save successfull",
-            CompanyDetail: createdCompanyDetail,
-            status: true,
-          })
-        : res.status(400).json({
-            message: "something went wrong",
-            status: false,
-          });
-    }
-
-    const companyId = companyDetail[0]._id;
-
-    const existingDetails = await CompanyDetails.findById({
-      _id: companyId,
+    const existingCompany = await CompanyDetails.findOne({
+      // created_by: body.created_by,
+      database: body.database,
     });
 
-    if (!existingDetails) {
-      return res.status(404).json({
-        error: "company detail not found",
-        status: false,
-      });
+    const payload = {
+      created_by: body.created_by,
+      email: body.email || "",
+      name: body.name || "",
+      mobileNo: body.mobileNo || "",
+      database: body.database || "",
+      gstNo: body.gstNo || "",
+      Prefix: body.Prefix || "",
+      Suffix: body.Suffix || "",
+      invoiceSeries,
+      activeFinancialYear: body.activeFinancialYear || "",
+      activeInvoicePrefix: body.activeInvoicePrefix || "",
+      activeInvoiceSuffix: body.activeInvoiceSuffix || "",
+      address: body.address || "",
+      openingBalance: body.openingBalance || 0,
+      openingType: body.openingType || "",
+      reDate: body.reDate || "",
+      bankDetails,
+
+      logo: logoFile?.filename || existingCompany?.logo || "",
+      signature: signatureFile?.filename || existingCompany?.signature || "",
+      qr_code:
+        qrCodeFile?.filename ||
+        existingCompany?.qr_code ||
+        (typeof body.qr_code === "string" ? body.qr_code : ""),
+    };
+
+    let result;
+
+    if (existingCompany) {
+      result = await CompanyDetails.findByIdAndUpdate(
+        existingCompany._id,
+        payload,
+        { new: true },
+      );
+    } else {
+      result = await CompanyDetails.create(payload);
     }
 
-    const updateDetails = await CompanyDetails.findByIdAndUpdate(
-      companyId,
-      req.body,
-      { new: true },
-    );
+    return res.status(200).json({
+      status: true,
+      message: "Company details saved successfully",
+      CompanyDetail: result,
+    });
+  } catch (error) {
+    console.error("saveCompanyDetails error:", error);
 
-    return updateDetails
-      ? res.status(200).json({
-          message: "Data Updated Successfully",
-          updateDetails,
-          CompanyDetail: updateDetails,
-          status: true,
-        })
-      : res.status(400).json({
-          message: "Something Went Wrong",
-          status: false,
-        });
-  } catch (err) {
-    console.log(err);
     return res.status(500).json({
-      error: "Internal Server Error",
       status: false,
+      message: error.message || "Internal server error",
     });
   }
 };

@@ -240,6 +240,56 @@ const hrmAttendanceSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    salaryPaymentStatus: {
+      type: String,
+      enum: ["Unpaid", "Paid"],
+      default: "Unpaid",
+      index: true,
+    },
+
+    salaryPaymentMonth: {
+      type: String,
+      default: "",
+      index: true,
+    },
+
+    salaryPaymentAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    salaryPaymentRemark: {
+      type: String,
+      default: "",
+    },
+
+    salaryPaymentBatchNo: {
+      type: String,
+      default: "",
+      index: true,
+    },
+
+    salaryPaidOn: {
+      type: String,
+      default: "",
+      index: true,
+    },
+
+    salaryPaidAt: {
+      type: String,
+      default: "",
+    },
+
+    salaryPaidBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    salaryPaidByName: {
+      type: String,
+      default: "",
+    },
   },
   { timestamps: true },
 );
@@ -252,6 +302,11 @@ hrmAttendanceSchema.index(
 hrmAttendanceSchema.index(
   { database: 1, userId: 1, date: 1, status: 1 },
   { name: "hrm_attendance_user_date_idx" },
+);
+
+hrmAttendanceSchema.index(
+  { database: 1, salaryPaymentMonth: 1, salaryPaymentStatus: 1 },
+  { name: "hrm_attendance_salary_payment_idx" },
 );
 
 // Important during development: refresh old compiled schema

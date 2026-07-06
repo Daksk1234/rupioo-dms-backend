@@ -7,6 +7,7 @@ import {
   deleteExpense,
   getExpenses,
   getRequestedExpenses,
+  payExpense,
   rejectExpense,
   resubmitExpense,
   updateExpense,
@@ -22,6 +23,7 @@ router.get("/:db", getExpenses);
 router.patch("/:id/:db/approve", approveExpense);
 router.patch("/:id/:db/reject", rejectExpense);
 router.patch("/:id/:db/resubmit", resubmitExpense);
+router.patch("/:id/:db/pay", payExpense);
 
 router.put("/:id/:db", updateExpense);
 router.delete("/:id/:db", deleteExpense);

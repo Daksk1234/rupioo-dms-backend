@@ -13,6 +13,7 @@ import {
   listEmployeeLedger,
   getSalaryDeductions,
   markSalaryDeduction,
+  payLoanAdvance,
 } from "../controller/hrmLoanAdvance.controller.js";
 
 export const hrmLoanAdvanceRouter = express.Router();
@@ -25,6 +26,7 @@ hrmLoanAdvanceRouter.put("/update/:id/:database", updateLoanAdvance);
 hrmLoanAdvanceRouter.put("/approve/:id/:database", approveLoanAdvance);
 hrmLoanAdvanceRouter.put("/reject/:id/:database", rejectLoanAdvance);
 hrmLoanAdvanceRouter.put("/hold/:id/:database", holdLoanAdvance);
+hrmLoanAdvanceRouter.put("/pay/:id/:database", payLoanAdvance);
 
 hrmLoanAdvanceRouter.delete("/delete/:id/:database", deleteLoanAdvance);
 

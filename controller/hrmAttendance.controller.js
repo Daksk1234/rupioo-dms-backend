@@ -64,6 +64,81 @@ const todayDate = () => {
   return `${y}-${m}-${day}`;
 };
 
+const toMonthKey = (value = "") => {
+  const text = str(value);
+  if (/^\d{4}-\d{2}$/.test(text)) return text;
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 7);
+
+  const d = text ? new Date(text) : new Date();
+  if (Number.isNaN(d.getTime())) return todayDate().slice(0, 7);
+
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const nextMonthKey = (month = "") => {
+  const safeMonth = toMonthKey(month);
+  const [year, monthNo] = safeMonth.split("-").map(Number);
+  const d = new Date(year, monthNo, 1);
+
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const daysInMonth = (month = "") => {
+  const safeMonth = toMonthKey(month);
+  const [year, monthNo] = safeMonth.split("-").map(Number);
+  return new Date(year, monthNo, 0).getDate() || 30;
+};
+
+const paymentBatchNo = () => {
+  const d = new Date();
+  return `SAL-${d.getFullYear()}${String(d.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}${String(d.getDate()).padStart(2, "0")}-${String(Date.now()).slice(-5)}`;
+};
+
+const attendanceSalaryAmount = (row = {}) => {
+  const salary = num(row.salary || row.monthlySalary || row.salaryAmount);
+  if (!salary) return 0;
+
+  const month = toMonthKey(
+    row.date || row.attendanceDate || row.salaryPaymentMonth,
+  );
+  const perDay = salary / (daysInMonth(month) || 30);
+  const type = str(row.attendanceType).toLowerCase();
+
+  if (row.status === "Deleted") return 0;
+  if (type.includes("absent") || type.includes("leave")) return 0;
+  if (!row.inTime && !row.outTime && !type.includes("half")) return 0;
+  if (row.isHalfDay || type.includes("half"))
+    return Number((perDay / 2).toFixed(2));
+
+  return Number(perDay.toFixed(2));
+};
+
+const getSalaryPaymentEmployeeKey = (row = {}) => {
+  return str(
+    row.employeeId ||
+      row.employeeIdText ||
+      row.userId ||
+      row.faceId ||
+      row.panNumber ||
+      row.aadharNumber ||
+      row.nameSnapshot ||
+      "",
+  );
+};
+
+const getLatestTextDate = (rows = [], field = "") => {
+  return (
+    rows
+      .map((row) => str(row?.[field]))
+      .filter(Boolean)
+      .sort()
+      .pop() || ""
+  );
+};
+
 const normalizeTime = (value) => {
   if (!value) return "";
 
@@ -417,6 +492,18 @@ async function buildPayload(body = {}, database) {
     checkOutAt: str(
       body.checkOutAt || (outTime ? new Date().toISOString() : ""),
     ),
+
+    salaryPaymentStatus: ["Paid", "Unpaid"].includes(body.salaryPaymentStatus)
+      ? body.salaryPaymentStatus
+      : "Unpaid",
+    salaryPaymentMonth: str(body.salaryPaymentMonth || date.slice(0, 7)),
+    salaryPaymentAmount: num(body.salaryPaymentAmount),
+    salaryPaymentRemark: str(body.salaryPaymentRemark || ""),
+    salaryPaymentBatchNo: str(body.salaryPaymentBatchNo || ""),
+    salaryPaidOn: str(body.salaryPaidOn || ""),
+    salaryPaidAt: str(body.salaryPaidAt || ""),
+    salaryPaidBy: toObjectId(body.salaryPaidBy),
+    salaryPaidByName: str(body.salaryPaidByName || ""),
   };
 }
 
@@ -517,6 +604,13 @@ export const createAttendance = async (req, res) => {
 
       if (payload.outTime) {
         existing.checkOutAt = payload.checkOutAt;
+      }
+
+      if (!existing.salaryPaymentMonth) {
+        existing.salaryPaymentMonth = payload.salaryPaymentMonth;
+      }
+      if (!existing.salaryPaymentStatus) {
+        existing.salaryPaymentStatus = "Unpaid";
       }
 
       await existing.save();
@@ -698,6 +792,9 @@ export const updateAttendance = async (req, res) => {
     if (payload.inTime && !row.checkInAt) row.checkInAt = payload.checkInAt;
     if (payload.outTime) row.checkOutAt = payload.checkOutAt;
 
+    row.salaryPaymentMonth = payload.salaryPaymentMonth || row.date.slice(0, 7);
+    row.salaryPaymentStatus = row.salaryPaymentStatus || "Unpaid";
+
     await row.save();
 
     const populated = await populateAttendanceQuery(
@@ -711,6 +808,270 @@ export const updateAttendance = async (req, res) => {
     );
   } catch (error) {
     return fail(res, 500, "Unable to update attendance.", error);
+  }
+};
+
+export const listSalaryMonthPayments = async (req, res) => {
+  try {
+    const database = cleanDatabase(req.params.database);
+    const filter = {
+      database,
+      status: { $ne: "Deleted" },
+    };
+
+    const month = str(req.query.month || req.query.salaryMonth || "");
+    if (month) {
+      const safeMonth = toMonthKey(month);
+      filter.date = {
+        $gte: `${safeMonth}-01`,
+        $lt: `${nextMonthKey(safeMonth)}-01`,
+      };
+    } else if (req.query.from || req.query.to) {
+      filter.date = {};
+      if (req.query.from) filter.date.$gte = str(req.query.from);
+      if (req.query.to) filter.date.$lte = str(req.query.to);
+    }
+
+    if (req.query.userId && isValidObjectId(req.query.userId)) {
+      filter.userId = toObjectId(req.query.userId);
+    }
+
+    if (req.query.employeeId && isValidObjectId(req.query.employeeId)) {
+      filter.employeeId = toObjectId(req.query.employeeId);
+    }
+
+    if (req.query.faceId && isValidObjectId(req.query.faceId)) {
+      filter.faceId = toObjectId(req.query.faceId);
+    }
+
+    const rows = await HrmAttendance.find(filter)
+      .sort({ date: -1, nameSnapshot: 1, createdAt: -1 })
+      .lean();
+
+    const grouped = new Map();
+
+    rows.forEach((row) => {
+      const salaryMonth = str(row.salaryPaymentMonth) || toMonthKey(row.date);
+      const employeeKey = getSalaryPaymentEmployeeKey(row);
+      if (!salaryMonth || !employeeKey) return;
+
+      const key = `${employeeKey}_${salaryMonth}`;
+      const amount = attendanceSalaryAmount(row);
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          _id: key,
+          groupKey: key,
+          database,
+          month: salaryMonth,
+          salaryMonth,
+          date: `${salaryMonth}-01`,
+
+          userId: row.userId || null,
+          employeeId: row.employeeId || row.userId || null,
+          employeeIdText: str(row.employeeId || row.userId || ""),
+          faceId: row.faceId || null,
+          employeeName: str(row.nameSnapshot || "Employee"),
+          panNumber: str(row.panNumber || ""),
+          aadharNumber: str(row.aadharNumber || ""),
+          salary: row.salary || "",
+
+          payableAmount: 0,
+          amount: 0,
+          attendanceCount: 0,
+          paidCount: 0,
+          unpaidCount: 0,
+          presentCount: 0,
+          halfDayCount: 0,
+          absentCount: 0,
+          attendanceIds: [],
+          paymentStatus: "Unpaid",
+          salaryPaymentStatus: "Unpaid",
+          paidOn: "",
+          paidAt: "",
+          salaryPaidOn: "",
+          salaryPaidAt: "",
+          paymentRemark: "",
+          salaryPaymentRemark: "",
+          paymentBatchNo: "",
+          salaryPaymentBatchNo: "",
+          paidByName: "",
+          salaryPaidByName: "",
+        });
+      }
+
+      const item = grouped.get(key);
+      const isPaid = str(row.salaryPaymentStatus || "Unpaid") === "Paid";
+      const type = str(row.attendanceType).toLowerCase();
+
+      item.payableAmount = Number((item.payableAmount + amount).toFixed(2));
+      item.amount = item.payableAmount;
+      item.attendanceCount += 1;
+      item.attendanceIds.push(row._id);
+
+      if (isPaid) item.paidCount += 1;
+      else item.unpaidCount += 1;
+
+      if (row.isHalfDay || type.includes("half")) item.halfDayCount += 1;
+      else if (type.includes("absent") || (!row.inTime && !row.outTime)) {
+        item.absentCount += 1;
+      } else {
+        item.presentCount += 1;
+      }
+    });
+
+    let payments = Array.from(grouped.values()).map((item) => {
+      const status =
+        item.attendanceCount > 0 && item.unpaidCount === 0 ? "Paid" : "Unpaid";
+      const rowsForGroup = rows.filter((row) => {
+        const salaryMonth = str(row.salaryPaymentMonth) || toMonthKey(row.date);
+        const employeeKey = getSalaryPaymentEmployeeKey(row);
+        return `${employeeKey}_${salaryMonth}` === item.groupKey;
+      });
+
+      const paidOn = getLatestTextDate(rowsForGroup, "salaryPaidOn");
+      const paidAt = getLatestTextDate(rowsForGroup, "salaryPaidAt");
+      const remark =
+        rowsForGroup
+          .map((row) => str(row.salaryPaymentRemark))
+          .filter(Boolean)
+          .pop() || "";
+      const batchNo =
+        rowsForGroup
+          .map((row) => str(row.salaryPaymentBatchNo))
+          .filter(Boolean)
+          .pop() || "";
+      const paidByName =
+        rowsForGroup
+          .map((row) => str(row.salaryPaidByName))
+          .filter(Boolean)
+          .pop() || "";
+
+      return {
+        ...item,
+        paymentStatus: status,
+        salaryPaymentStatus: status,
+        paidOn,
+        paidAt,
+        salaryPaidOn: paidOn,
+        salaryPaidAt: paidAt,
+        paymentRemark: remark,
+        salaryPaymentRemark: remark,
+        paymentBatchNo: batchNo,
+        salaryPaymentBatchNo: batchNo,
+        paidByName,
+        salaryPaidByName: paidByName,
+      };
+    });
+
+    const requestedStatus = str(req.query.status || "All").toLowerCase();
+    if (requestedStatus === "paid") {
+      payments = payments.filter((row) => row.paymentStatus === "Paid");
+    } else if (requestedStatus === "unpaid") {
+      payments = payments.filter((row) => row.paymentStatus !== "Paid");
+    }
+
+    payments.sort((a, b) => {
+      const dateSort = str(b.month).localeCompare(str(a.month));
+      if (dateSort !== 0) return dateSort;
+      return str(a.employeeName).localeCompare(str(b.employeeName));
+    });
+
+    return success(
+      res,
+      "Salary month payments fetched successfully.",
+      payments,
+      {
+        rows: payments,
+        salaryMonths: payments,
+      },
+    );
+  } catch (error) {
+    return fail(res, 500, "Unable to fetch salary month payments.", error);
+  }
+};
+
+export const paySalaryMonth = async (req, res) => {
+  try {
+    const database = cleanDatabase(req.params.database);
+    const month = toMonthKey(req.body.month || req.body.salaryMonth);
+
+    if (!month) {
+      return fail(res, 400, "Salary month is required.");
+    }
+
+    const employeeIdRaw = str(
+      req.body.employeeId || req.body.employeeIdText || req.body.userId || "",
+    );
+    const faceIdRaw = str(req.body.faceId || "");
+    const employeeName = str(req.body.employeeName || "");
+
+    const or = [];
+    const employeeObjectId = toObjectId(employeeIdRaw);
+    const faceObjectId = toObjectId(faceIdRaw);
+
+    if (employeeObjectId) {
+      or.push({ employeeId: employeeObjectId }, { userId: employeeObjectId });
+    }
+    if (faceObjectId) or.push({ faceId: faceObjectId });
+    if (employeeName) or.push({ nameSnapshot: employeeName });
+
+    if (!or.length) {
+      return fail(res, 400, "Employee id or employee name is required.");
+    }
+
+    const filter = {
+      database,
+      status: { $ne: "Deleted" },
+      date: {
+        $gte: `${month}-01`,
+        $lt: `${nextMonthKey(month)}-01`,
+      },
+      $or: or,
+    };
+
+    const existingRows = await HrmAttendance.find(filter).lean();
+    if (!existingRows.length) {
+      return fail(res, 404, "No attendance found for this employee/month.");
+    }
+
+    const paidOn = todayDate();
+    const paidAt = new Date().toISOString();
+    const batchNo =
+      str(req.body.paymentBatchNo || req.body.salaryPaymentBatchNo) ||
+      paymentBatchNo();
+    const paidBy = toObjectId(req.body.paidBy || req.body.actionBy);
+    const paidByName = str(req.body.paidByName || req.body.actionByName || "");
+    const paymentRemark = str(
+      req.body.paymentRemark || req.body.paidRemark || "",
+    );
+    const paymentAmount = num(req.body.payableAmount || req.body.amount);
+
+    const result = await HrmAttendance.updateMany(filter, {
+      $set: {
+        salaryPaymentStatus: "Paid",
+        salaryPaymentMonth: month,
+        salaryPaymentAmount: paymentAmount,
+        salaryPaymentRemark: paymentRemark,
+        salaryPaymentBatchNo: batchNo,
+        salaryPaidOn: paidOn,
+        salaryPaidAt: paidAt,
+        salaryPaidBy: paidBy,
+        salaryPaidByName: paidByName,
+      },
+    });
+
+    return success(res, "Salary month marked as paid successfully.", {
+      month,
+      paidOn,
+      paidAt,
+      paymentBatchNo: batchNo,
+      salaryPaymentBatchNo: batchNo,
+      modifiedCount: result.modifiedCount || result.nModified || 0,
+      matchedCount: result.matchedCount || result.n || existingRows.length,
+    });
+  } catch (error) {
+    return fail(res, 500, "Unable to pay salary month.", error);
   }
 };
 

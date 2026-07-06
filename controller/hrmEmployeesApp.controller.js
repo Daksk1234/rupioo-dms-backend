@@ -1,4 +1,7 @@
+// File: controllers/hrmEmployeesApp.controller.js
+import mongoose from "mongoose";
 import HrmEmployeesApp from "../model/hrmEmployeesApp.model.js";
+import { HrmFace } from "../model/hrmFace.model.js";
 
 function safeText(value) {
   if (value === null || value === undefined) return "";
@@ -11,6 +14,17 @@ function onlyDigits(value) {
 
 function cleanPan(value) {
   return safeText(value).toUpperCase();
+}
+
+function normalizeStatus(value, fallback = "Active") {
+  const text = safeText(value || fallback).toLowerCase();
+
+  if (text === "inactive") return "Inactive";
+  return "Active";
+}
+
+function hasBodyKey(body = {}, key) {
+  return Object.prototype.hasOwnProperty.call(body, key);
 }
 
 function employeePayload(body = {}) {
@@ -34,9 +48,51 @@ function employeePayload(body = {}) {
       body.faceRegistered === true ||
       body.faceRegistered === "true" ||
       !!safeText(body.faceId),
-    status: safeText(body.status) || "Active",
+    status: normalizeStatus(body.status, "Active"),
     raw: body.raw || {},
   };
+}
+
+function employeeUpdatePayload(body = {}) {
+  const update = {};
+
+  if (hasBodyKey(body, "created_by") || hasBodyKey(body, "createdBy")) {
+    update.created_by = safeText(body.created_by || body.createdBy);
+  }
+
+  if (hasBodyKey(body, "name")) update.name = safeText(body.name);
+  if (hasBodyKey(body, "address")) update.address = safeText(body.address);
+  if (hasBodyKey(body, "dob")) update.dob = safeText(body.dob);
+  if (hasBodyKey(body, "mobile") || hasBodyKey(body, "mobileNumber")) {
+    update.mobile = onlyDigits(body.mobile || body.mobileNumber);
+  }
+  if (hasBodyKey(body, "pan") || hasBodyKey(body, "panNumber")) {
+    update.pan = cleanPan(body.pan || body.panNumber);
+  }
+  if (hasBodyKey(body, "aadhar") || hasBodyKey(body, "aadharNumber")) {
+    update.aadhar = onlyDigits(body.aadhar || body.aadharNumber);
+  }
+  if (hasBodyKey(body, "pincode")) update.pincode = onlyDigits(body.pincode);
+  if (hasBodyKey(body, "designation")) {
+    update.designation = safeText(body.designation);
+  }
+  if (hasBodyKey(body, "salary")) update.salary = safeText(body.salary);
+  if (hasBodyKey(body, "shiftId")) update.shiftId = safeText(body.shiftId);
+  if (hasBodyKey(body, "photoUri")) update.photoUri = safeText(body.photoUri);
+  if (hasBodyKey(body, "photoUrl")) update.photoUrl = safeText(body.photoUrl);
+  if (hasBodyKey(body, "faceId")) update.faceId = safeText(body.faceId);
+  if (hasBodyKey(body, "faceRegistered")) {
+    update.faceRegistered =
+      body.faceRegistered === true || body.faceRegistered === "true";
+  }
+  if (hasBodyKey(body, "status")) {
+    update.status = normalizeStatus(body.status, "Active");
+  }
+  if (hasBodyKey(body, "raw")) update.raw = body.raw || {};
+
+  if (update.faceId) update.faceRegistered = true;
+
+  return update;
 }
 
 function sendError(res, error, fallback = "Something went wrong") {
@@ -49,6 +105,78 @@ function sendError(res, error, fallback = "Something went wrong") {
         ? "Employee with same PAN or Aadhaar already exists."
         : error?.message || fallback,
   });
+}
+
+function isValidObjectId(value) {
+  return mongoose.Types.ObjectId.isValid(String(value || ""));
+}
+
+function faceMatchQueryFromEmployee(employee) {
+  const or = [];
+
+  if (employee._id && isValidObjectId(employee._id)) {
+    or.push({ userId: employee._id });
+    or.push({ employeeId: employee._id });
+  }
+
+  if (safeText(employee.faceId) && isValidObjectId(employee.faceId)) {
+    or.push({ _id: employee.faceId });
+  }
+
+  if (cleanPan(employee.pan)) {
+    or.push({ panNumber: cleanPan(employee.pan) });
+  }
+
+  if (onlyDigits(employee.aadhar)) {
+    or.push({ aadharNumber: onlyDigits(employee.aadhar) });
+  }
+
+  if (!or.length) return null;
+
+  return {
+    database: employee.database,
+    status: { $ne: "Deleted" },
+    $or: or,
+  };
+}
+
+async function syncFaceFromEmployee(employee) {
+  try {
+    if (!employee || !employee.database || !employee._id) return;
+
+    const status = normalizeStatus(employee.status, "Active");
+    const query = faceMatchQueryFromEmployee(employee);
+
+    if (!query) return;
+
+    const update = {
+      status,
+      employeeId: employee._id,
+      userId: employee._id,
+      nameSnapshot: safeText(employee.name),
+      salary: safeText(employee.salary),
+      panNumber: cleanPan(employee.pan),
+      aadharNumber: onlyDigits(employee.aadhar),
+    };
+
+    if (safeText(employee.shiftId) && isValidObjectId(employee.shiftId)) {
+      update.shiftId = new mongoose.Types.ObjectId(employee.shiftId);
+    }
+
+    const face = await HrmFace.findOneAndUpdate(query, update, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (face && String(employee.faceId || "") !== String(face._id || "")) {
+      await HrmEmployeesApp.findByIdAndUpdate(employee._id, {
+        faceId: String(face._id),
+        faceRegistered: true,
+      });
+    }
+  } catch (error) {
+    console.log("Employee -> face status sync failed:", error?.message || error);
+  }
 }
 
 export const createHrmEmployeeApp = async (req, res) => {
@@ -70,6 +198,7 @@ export const createHrmEmployeeApp = async (req, res) => {
     }
 
     const employee = await HrmEmployeesApp.create(payload);
+    await syncFaceFromEmployee(employee);
 
     return res.status(201).json({
       status: true,
@@ -131,8 +260,7 @@ export const viewHrmEmployeeAppById = async (req, res) => {
 
 export const updateHrmEmployeeApp = async (req, res) => {
   try {
-    const payload = employeePayload(req.body);
-    delete payload.database;
+    const payload = employeeUpdatePayload(req.body);
 
     const employee = await HrmEmployeesApp.findByIdAndUpdate(
       req.params.id,
@@ -147,6 +275,8 @@ export const updateHrmEmployeeApp = async (req, res) => {
       });
     }
 
+    await syncFaceFromEmployee(employee);
+
     return res.status(200).json({
       status: true,
       message: "Employee updated successfully.",
@@ -158,16 +288,52 @@ export const updateHrmEmployeeApp = async (req, res) => {
   }
 };
 
-export const markHrmEmployeeFaceRegistered = async (req, res) => {
+export const setHrmEmployeeStatusApp = async (req, res) => {
   try {
+    const status = normalizeStatus(req.body?.status, "Active");
+
     const employee = await HrmEmployeesApp.findByIdAndUpdate(
       req.params.id,
-      {
-        faceId: safeText(req.body.faceId),
-        faceRegistered: true,
-        photoUri: safeText(req.body.photoUri),
-        photoUrl: safeText(req.body.photoUrl),
-      },
+      { status },
+      { new: true, runValidators: true },
+    );
+
+    if (!employee) {
+      return res.status(404).json({
+        status: false,
+        message: "Employee not found.",
+      });
+    }
+
+    await syncFaceFromEmployee(employee);
+
+    return res.status(200).json({
+      status: true,
+      message: `Employee marked ${status}.`,
+      data: employee,
+      employee,
+    });
+  } catch (error) {
+    return sendError(res, error, "Unable to update employee status.");
+  }
+};
+
+export const markHrmEmployeeFaceRegistered = async (req, res) => {
+  try {
+    const update = {
+      faceId: safeText(req.body.faceId),
+      faceRegistered: true,
+      photoUri: safeText(req.body.photoUri),
+      photoUrl: safeText(req.body.photoUrl),
+    };
+
+    if (req.body?.status !== undefined) {
+      update.status = normalizeStatus(req.body.status, "Active");
+    }
+
+    const employee = await HrmEmployeesApp.findByIdAndUpdate(
+      req.params.id,
+      update,
       { new: true },
     );
 
@@ -177,6 +343,8 @@ export const markHrmEmployeeFaceRegistered = async (req, res) => {
         message: "Employee not found.",
       });
     }
+
+    await syncFaceFromEmployee(employee);
 
     return res.status(200).json({
       status: true,

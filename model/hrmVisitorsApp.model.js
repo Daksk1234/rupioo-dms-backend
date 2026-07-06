@@ -1,5 +1,4 @@
 // File: models/hrmVisitorsApp.model.js
-
 import mongoose from "mongoose";
 
 const HrmVisitorsAppSchema = new mongoose.Schema(
@@ -10,7 +9,12 @@ const HrmVisitorsAppSchema = new mongoose.Schema(
     mobile: { type: String, trim: true },
     address: { type: String, trim: true },
     photoUri: { type: String, default: "" },
-    status: { type: String, default: "Active" },
+    status: {
+      type: String,
+      enum: ["Active", "Inactive", "Deleted"],
+      default: "Active",
+      index: true,
+    },
     deleted: { type: Boolean, default: false },
   },
   { timestamps: true },

@@ -12,6 +12,21 @@ const CorrectionHistorySchema = new mongoose.Schema(
   { _id: false },
 );
 
+const ExpensePhotoSchema = new mongoose.Schema(
+  {
+    fileName: { type: String, default: "", trim: true },
+    uri: { type: String, default: "", trim: true },
+    url: { type: String, default: "" },
+    base64: { type: String, default: "" },
+    mimeType: { type: String, default: "", trim: true },
+    source: { type: String, default: "", trim: true },
+    width: { type: Number, default: 0 },
+    height: { type: Number, default: 0 },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const ExpenseSchema = new mongoose.Schema(
   {
     database: {
@@ -108,6 +123,13 @@ const ExpenseSchema = new mongoose.Schema(
       trim: true,
     },
 
+    expenseDate: {
+      type: String,
+      default: "",
+      index: true,
+      trim: true,
+    },
+
     durationFrom: {
       type: String,
       required: true,
@@ -127,11 +149,52 @@ const ExpenseSchema = new mongoose.Schema(
       default: 1,
     },
 
+    expensePhotos: {
+      type: [ExpensePhotoSchema],
+      default: [],
+    },
+
     status: {
       type: String,
       enum: ["Requested", "Approved", "Rejected", "Deleted"],
       default: "Requested",
       index: true,
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ["Unpaid", "Paid"],
+      default: "Unpaid",
+      index: true,
+    },
+
+    paymentRemark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    paidBy: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    paidByName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+
+    paidOn: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     rejectionReason: {
@@ -239,6 +302,12 @@ ExpenseSchema.index({
   database: 1,
   userId: 1,
   status: 1,
+});
+
+ExpenseSchema.index({
+  database: 1,
+  status: 1,
+  paymentStatus: 1,
 });
 
 export default mongoose.model("Expense", ExpenseSchema);

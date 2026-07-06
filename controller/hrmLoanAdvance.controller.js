@@ -64,6 +64,20 @@ const todayDate = () => {
   )}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+const toDateOnly = (value) => {
+  const text = str(value);
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+
+  const d = new Date(text);
+  if (Number.isNaN(d.getTime())) return "";
+
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 const monthKey = (date = new Date()) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
     2,
@@ -209,7 +223,7 @@ const buildCalculation = ({
       totalPayable,
       totalInterest,
       allowedLimitAmount,
-      isWithinLimit: monthlyEmi <= allowedLimitAmount,
+      isWithinLimit: principal <= allowedLimitAmount,
     };
   }
 
@@ -297,9 +311,9 @@ const validatePayload = (payload, mode = "create") => {
       throw new Error("Loan tenure is required.");
     }
 
-    if (payload.monthlyEmi > payload.allowedLimitAmount) {
+    if (payload.amount > payload.allowedLimitAmount) {
       throw new Error(
-        `Loan EMI ${money(payload.monthlyEmi)} is more than allowed salary limit ${money(
+        `Loan basic amount ${money(payload.amount)} is more than allowed salary limit ${money(
           payload.allowedLimitAmount,
         )}.`,
       );
@@ -324,6 +338,91 @@ const validatePayload = (payload, mode = "create") => {
   }
 
   return true;
+};
+
+const RUNNING_LIMIT_STATUSES = ["Approved"];
+const IGNORED_LIMIT_STATUSES = ["Deleted"];
+
+const getActiveLimitQuery = (payload = {}, excludeId = "") => {
+  const employeeObjectId =
+    payload.employeeId || toObjectId(payload.employeeIdText);
+  const employeeIdText = str(
+    payload.employeeIdText || payload.employeeId || "",
+  );
+
+  const or = [
+    ...(employeeObjectId ? [{ employeeId: employeeObjectId }] : []),
+    ...(employeeIdText ? [{ employeeIdText }] : []),
+  ];
+
+  if (!or.length) {
+    throw new Error("Employee is required for salary limit check.");
+  }
+
+  return {
+    database: payload.database,
+    status: { $in: RUNNING_LIMIT_STATUSES, $nin: IGNORED_LIMIT_STATUSES },
+    ...(excludeId ? { _id: { $ne: toObjectId(excludeId) || excludeId } } : {}),
+    $or: or,
+  };
+};
+
+const getActiveBasicLimitUsage = async ({
+  payload,
+  excludeId = "",
+  session = null,
+}) => {
+  const query = getActiveLimitQuery(payload, excludeId);
+
+  let request = HrmLoanAdvance.find(query).select(
+    "requestNo requestType status amount paidAmount employeeName",
+  );
+
+  if (session) request = request.session(session);
+
+  const rows = await request.lean();
+  const usedBasicAmount = rows.reduce((sum, row) => {
+    const basicAmount = num(row.amount);
+    const paidAmount = num(row.paidAmount);
+
+    return sum + Math.max(basicAmount - paidAmount, 0);
+  }, 0);
+
+  return {
+    rows,
+    usedBasicAmount,
+    availableBasicAmount: Math.max(
+      num(payload.allowedLimitAmount) - usedBasicAmount,
+      0,
+    ),
+    requestedBasicAmount: num(payload.amount),
+  };
+};
+
+const validateActiveBasicSalaryLimit = async ({
+  payload,
+  excludeId = "",
+  session = null,
+} = {}) => {
+  const usage = await getActiveBasicLimitUsage({ payload, excludeId, session });
+  const totalAfterRequest = usage.usedBasicAmount + usage.requestedBasicAmount;
+  const allowedLimitAmount = num(payload.allowedLimitAmount);
+
+  if (totalAfterRequest > allowedLimitAmount) {
+    throw new Error(
+      `${payload.requestType} basic amount ${money(
+        usage.requestedBasicAmount,
+      )} cannot be added. Salary limit is ${money(
+        allowedLimitAmount,
+      )}; already used in approved loan / advance is ${money(
+        usage.usedBasicAmount,
+      )}; available limit is ${money(
+        usage.availableBasicAmount,
+      )}. Pay EMI / deduct advance / close the old approved loan or advance before adding more.`,
+    );
+  }
+
+  return usage;
 };
 
 const buildPayload = (body = {}, database, oldRow = null) => {
@@ -436,6 +535,14 @@ const buildPayload = (body = {}, database, oldRow = null) => {
 
     approvalRemark: str(body.approvalRemark || oldRow?.approvalRemark || ""),
 
+    // Payment fields must be changed only by payLoanAdvance().
+    paymentStatus: str(oldRow?.paymentStatus || "Unpaid") || "Unpaid",
+    paymentRemark: str(oldRow?.paymentRemark || ""),
+    paidBy: toObjectId(oldRow?.paidBy),
+    paidByName: str(oldRow?.paidByName || ""),
+    paidAt: str(oldRow?.paidAt || ""),
+    paidOn: str(oldRow?.paidOn || ""),
+
     requestedBy: toObjectId(body.requestedBy || oldRow?.requestedBy),
     createdBy: toObjectId(body.createdBy || oldRow?.createdBy),
     updatedBy: toObjectId(body.updatedBy || oldRow?.updatedBy),
@@ -445,6 +552,8 @@ const buildPayload = (body = {}, database, oldRow = null) => {
 const createOpeningLedger = async (row) => {
   const isLoan = row.requestType === "Loan";
   const now = new Date().toISOString();
+  const ledgerDate = toDateOnly(row.requestDate) || todayDate();
+  const ledgerMonth = ledgerDate.slice(0, 7);
 
   const ledger = await HrmEmployeeLedger.create({
     database: row.database,
@@ -455,8 +564,8 @@ const createOpeningLedger = async (row) => {
 
     requestId: row._id,
 
-    date: todayDate(),
-    month: monthKey(),
+    date: ledgerDate,
+    month: ledgerMonth,
 
     type: row.requestType,
 
@@ -490,6 +599,7 @@ export const createLoanAdvance = async (req, res) => {
     const payload = buildPayload(req.body, database);
 
     validatePayload(payload, "create");
+    await validateActiveBasicSalaryLimit({ payload });
 
     const row = await HrmLoanAdvance.create(payload);
 
@@ -510,6 +620,7 @@ export const listLoanAdvances = async (req, res) => {
 
     if (req.query.status) query.status = req.query.status;
     if (req.query.requestType) query.requestType = req.query.requestType;
+    if (req.query.paymentStatus) query.paymentStatus = req.query.paymentStatus;
 
     if (req.query.employeeId) {
       const employeeObjectId = toObjectId(req.query.employeeId);
@@ -586,6 +697,10 @@ export const updateLoanAdvance = async (req, res) => {
     const payload = buildPayload(req.body, database, oldRow);
 
     validatePayload(payload, "update");
+    await validateActiveBasicSalaryLimit({
+      payload,
+      excludeId: req.params.id,
+    });
 
     Object.assign(oldRow, payload);
     await oldRow.save();
@@ -623,6 +738,11 @@ export const approveLoanAdvance = async (req, res) => {
       const mergedPayload = buildPayload(req.body, database, row);
 
       validatePayload(mergedPayload, "approve");
+      await validateActiveBasicSalaryLimit({
+        payload: mergedPayload,
+        excludeId: row._id,
+        session,
+      });
 
       row.employeeId = mergedPayload.employeeId;
       row.employeeIdText = mergedPayload.employeeIdText;
@@ -663,6 +783,12 @@ export const approveLoanAdvance = async (req, res) => {
       row.paidAmount = 0;
       row.outstandingAmount =
         row.requestType === "Loan" ? row.totalPayable : row.amount;
+      row.paymentStatus = "Unpaid";
+      row.paymentRemark = "";
+      row.paidBy = null;
+      row.paidByName = "";
+      row.paidAt = "";
+      row.paidOn = "";
 
       if (row.requestType === "Loan") {
         row.emiSchedule = buildEmiSchedule(row);
@@ -680,6 +806,9 @@ export const approveLoanAdvance = async (req, res) => {
 
       savedRow = await row.save({ session });
 
+      const ledgerDate = toDateOnly(row.requestDate) || todayDate();
+      const ledgerMonth = ledgerDate.slice(0, 7);
+
       ledgerRow = await HrmEmployeeLedger.create(
         [
           {
@@ -691,8 +820,8 @@ export const approveLoanAdvance = async (req, res) => {
 
             requestId: row._id,
 
-            date: todayDate(),
-            month: monthKey(),
+            date: ledgerDate,
+            month: ledgerMonth,
 
             type: row.requestType,
 
@@ -801,6 +930,54 @@ export const holdLoanAdvance = async (req, res) => {
     return success(res, "Request placed on hold successfully.", row);
   } catch (error) {
     return fail(res, 500, "Unable to hold request.", error);
+  }
+};
+
+export const payLoanAdvance = async (req, res) => {
+  try {
+    const database = cleanDatabase(req.params.database);
+
+    if (!isValidObjectId(req.params.id)) {
+      return fail(res, 400, "Valid request id is required.");
+    }
+
+    const row = await HrmLoanAdvance.findOne({
+      _id: req.params.id,
+      database,
+      status: "Approved",
+    });
+
+    if (!row) {
+      return fail(res, 404, "Approved loan / advance request not found.");
+    }
+
+    if (row.paymentStatus === "Paid") {
+      return success(res, "Loan / advance is already marked as paid.", row);
+    }
+
+    row.paymentStatus = "Paid";
+    row.paymentRemark = str(
+      req.body.paymentRemark ||
+        req.body.paidRemark ||
+        req.body.remark ||
+        req.body.superAdminRemark ||
+        "",
+    );
+    row.paidBy = toObjectId(
+      req.body.paidBy || req.body.actionBy || req.body.userId,
+    );
+    row.paidByName = str(req.body.paidByName || req.body.actionByName || "");
+    row.paidAt = new Date().toISOString();
+    row.paidOn = todayDate();
+    row.updatedBy = toObjectId(
+      req.body.updatedBy || req.body.actionBy || req.body.userId,
+    );
+
+    await row.save();
+
+    return success(res, "Loan / advance marked as paid successfully.", row);
+  } catch (error) {
+    return fail(res, 400, "Unable to mark loan / advance as paid.", error);
   }
 };
 
