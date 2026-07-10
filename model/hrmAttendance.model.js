@@ -4,12 +4,7 @@ import mongoose from "mongoose";
 
 const hrmAttendanceSchema = new mongoose.Schema(
   {
-    database: {
-      type: String,
-      required: true,
-      index: true,
-      trim: true,
-    },
+    database: { type: String, required: true, index: true, trim: true },
 
     userId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -37,89 +32,34 @@ const hrmAttendanceSchema = new mongoose.Schema(
       index: true,
     },
 
-    panNumber: {
-      type: String,
-      uppercase: true,
-      trim: true,
-      default: "",
-    },
+    panNumber: { type: String, uppercase: true, trim: true, default: "" },
+    aadharNumber: { type: String, trim: true, default: "" },
+    nameSnapshot: { type: String, default: "" },
+    salary: { type: String, default: "" },
 
-    aadharNumber: {
-      type: String,
-      trim: true,
-      default: "",
-    },
+    date: { type: String, required: true, index: true },
+    attendanceDate: { type: String, default: "" },
 
-    nameSnapshot: {
-      type: String,
-      default: "",
-    },
+    inTime: { type: String, default: "" },
+    lunchOut: { type: String, default: "" },
+    lunchIn: { type: String, default: "" },
+    outTime: { type: String, default: "" },
 
-    salary: {
-      type: String,
-      default: "",
-    },
+    expectedInTime: { type: String, default: "" },
+    expectedLunchOut: { type: String, default: "" },
+    expectedLunchIn: { type: String, default: "" },
+    expectedOutTime: { type: String, default: "" },
 
-    date: {
-      type: String,
-      required: true,
-      index: true,
-    },
+    lunchLateMinutes: { type: Number, default: 0 },
+    lunchDeductionMinutes: { type: Number, default: 0 },
 
-    attendanceDate: {
-      type: String,
-      default: "",
-    },
+    lateByMinutes: { type: Number, default: 0 },
+    earlyOutMinutes: { type: Number, default: 0 },
+    earlyByMinutes: { type: Number, default: 0 },
 
-    inTime: {
-      type: String,
-      default: "",
-    },
-
-    outTime: {
-      type: String,
-      default: "",
-    },
-
-    expectedInTime: {
-      type: String,
-      default: "",
-    },
-
-    expectedOutTime: {
-      type: String,
-      default: "",
-    },
-
-    lateByMinutes: {
-      type: Number,
-      default: 0,
-    },
-
-    earlyOutMinutes: {
-      type: Number,
-      default: 0,
-    },
-
-    earlyByMinutes: {
-      type: Number,
-      default: 0,
-    },
-
-    workingMinutes: {
-      type: Number,
-      default: 0,
-    },
-
-    workingHours: {
-      type: Number,
-      default: 0,
-    },
-
-    workingHoursText: {
-      type: String,
-      default: "",
-    },
+    workingMinutes: { type: Number, default: 0 },
+    workingHours: { type: Number, default: 0 },
+    workingHoursText: { type: String, default: "" },
 
     attendanceType: {
       type: String,
@@ -127,65 +67,23 @@ const hrmAttendanceSchema = new mongoose.Schema(
       default: "Full Day",
     },
 
-    isHalfDay: {
-      type: Boolean,
-      default: false,
-    },
+    isHalfDay: { type: Boolean, default: false },
+    isManualHalfDay: { type: Boolean, default: false },
+    isLateHalfDay: { type: Boolean, default: false },
 
-    isManualHalfDay: {
-      type: Boolean,
-      default: false,
-    },
+    halfDayReason: { type: String, default: "" },
+    halfDayId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    halfDayMinutes: { type: Number, default: 0 },
+    halfDayTime: { type: String, default: "" },
 
-    isLateHalfDay: {
-      type: Boolean,
-      default: false,
-    },
+    checkInPhotoUrl: { type: String, default: "" },
+    lunchOutPhotoUrl: { type: String, default: "" },
+    lunchInPhotoUrl: { type: String, default: "" },
+    checkOutPhotoUrl: { type: String, default: "" },
+    photoUrl: { type: String, default: "" },
 
-    halfDayReason: {
-      type: String,
-      default: "",
-    },
-
-    halfDayId: {
-      type: mongoose.Schema.Types.ObjectId,
-      default: null,
-    },
-
-    halfDayMinutes: {
-      type: Number,
-      default: 0,
-    },
-
-    halfDayTime: {
-      type: String,
-      default: "",
-    },
-
-    checkInPhotoUrl: {
-      type: String,
-      default: "",
-    },
-
-    checkOutPhotoUrl: {
-      type: String,
-      default: "",
-    },
-
-    photoUrl: {
-      type: String,
-      default: "",
-    },
-
-    score: {
-      type: Number,
-      default: 0,
-    },
-
-    threshold: {
-      type: Number,
-      default: 0,
-    },
+    score: { type: Number, default: 0 },
+    threshold: { type: Number, default: 0 },
 
     location: {
       latitude: { type: Number, default: null },
@@ -194,30 +92,12 @@ const hrmAttendanceSchema = new mongoose.Schema(
       distanceMeters: { type: Number, default: null },
     },
 
-    deviceId: {
-      type: String,
-      default: "",
-    },
+    deviceId: { type: String, default: "" },
+    liveness: { type: Object, default: {} },
 
-    liveness: {
-      type: Object,
-      default: {},
-    },
-
-    correctionReason: {
-      type: String,
-      default: "",
-    },
-
-    editedManually: {
-      type: Boolean,
-      default: false,
-    },
-
-    correctionSource: {
-      type: String,
-      default: "",
-    },
+    correctionReason: { type: String, default: "" },
+    editedManually: { type: Boolean, default: false },
+    correctionSource: { type: String, default: "" },
 
     status: {
       type: String,
@@ -226,20 +106,11 @@ const hrmAttendanceSchema = new mongoose.Schema(
       index: true,
     },
 
-    markedAt: {
-      type: String,
-      default: "",
-    },
-
-    checkInAt: {
-      type: String,
-      default: "",
-    },
-
-    checkOutAt: {
-      type: String,
-      default: "",
-    },
+    markedAt: { type: String, default: "" },
+    checkInAt: { type: String, default: "" },
+    lunchOutAt: { type: String, default: "" },
+    lunchInAt: { type: String, default: "" },
+    checkOutAt: { type: String, default: "" },
 
     salaryPaymentStatus: {
       type: String,
@@ -248,48 +119,14 @@ const hrmAttendanceSchema = new mongoose.Schema(
       index: true,
     },
 
-    salaryPaymentMonth: {
-      type: String,
-      default: "",
-      index: true,
-    },
-
-    salaryPaymentAmount: {
-      type: Number,
-      default: 0,
-    },
-
-    salaryPaymentRemark: {
-      type: String,
-      default: "",
-    },
-
-    salaryPaymentBatchNo: {
-      type: String,
-      default: "",
-      index: true,
-    },
-
-    salaryPaidOn: {
-      type: String,
-      default: "",
-      index: true,
-    },
-
-    salaryPaidAt: {
-      type: String,
-      default: "",
-    },
-
-    salaryPaidBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      default: null,
-    },
-
-    salaryPaidByName: {
-      type: String,
-      default: "",
-    },
+    salaryPaymentMonth: { type: String, default: "", index: true },
+    salaryPaymentAmount: { type: Number, default: 0 },
+    salaryPaymentRemark: { type: String, default: "" },
+    salaryPaymentBatchNo: { type: String, default: "", index: true },
+    salaryPaidOn: { type: String, default: "", index: true },
+    salaryPaidAt: { type: String, default: "" },
+    salaryPaidBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+    salaryPaidByName: { type: String, default: "" },
   },
   { timestamps: true },
 );

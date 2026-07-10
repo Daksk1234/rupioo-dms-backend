@@ -3,6 +3,7 @@
 import mongoose from "mongoose";
 import { HrmAttendance } from "../model/hrmAttendance.model.js";
 import { HrmFace } from "../model/hrmFace.model.js";
+import { HrmShift } from "../model/hrmShift.model.js";
 
 const success = (res, message, data = null, extra = {}) => {
   return res.status(200).json({
@@ -214,6 +215,56 @@ const calculateEarlyOut = (outTime, expectedOutTime) => {
   return Math.max(expected - actual, 0);
 };
 
+const calculateLunchLate = ({
+  lunchOut,
+  lunchIn,
+  outTime,
+  expectedLunchIn,
+}) => {
+  if (!lunchOut || !expectedLunchIn) return 0;
+
+  const actualReturn = minutesFromTime(lunchIn || outTime);
+  const expectedReturn = minutesFromTime(expectedLunchIn);
+
+  if (actualReturn === null || expectedReturn === null) return 0;
+
+  let adjustedActualReturn = actualReturn;
+
+  if (adjustedActualReturn < expectedReturn) {
+    const difference = expectedReturn - adjustedActualReturn;
+
+    if (difference > 12 * 60) {
+      adjustedActualReturn += 24 * 60;
+    }
+  }
+
+  return Math.max(adjustedActualReturn - expectedReturn, 0);
+};
+
+const getShiftDayForDate = (shift = {}, date = "") => {
+  const days = Array.isArray(shift?.days) ? shift.days : [];
+  if (!days.length) return null;
+
+  const parsedDate = new Date(`${date || todayDate()}T12:00:00`);
+  const safeDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  const jsDay = safeDate.getDay();
+  const dayNo = jsDay === 0 ? 7 : jsDay;
+  const dayName = safeDate
+    .toLocaleDateString("en-US", { weekday: "long" })
+    .toLowerCase();
+
+  return (
+    days.find((item) => Number(item?.dayNo) === dayNo) ||
+    days.find(
+      (item) =>
+        String(item?.day || "")
+          .trim()
+          .toLowerCase() === dayName,
+    ) ||
+    null
+  );
+};
+
 const calculateWorkingMinutes = ({
   inTime,
   outTime,
@@ -299,10 +350,24 @@ async function getFaceForPayload(database, body = {}) {
   }).lean();
 }
 
+async function getShiftForPayload(database, body = {}, face = null) {
+  const shiftId = toObjectId(body.shiftId || face?.shiftId);
+
+  if (!shiftId) return null;
+
+  return HrmShift.findOne({
+    _id: shiftId,
+    database,
+    status: { $ne: "Deleted" },
+  }).lean();
+}
+
 async function buildPayload(body = {}, database) {
   const face = await getFaceForPayload(database, body);
 
   const date = str(body.date || body.attendanceDate) || todayDate();
+  const shift = await getShiftForPayload(database, body, face);
+  const shiftDay = getShiftDayForDate(shift, date);
 
   const userIdRaw =
     body.userId ||
@@ -329,10 +394,34 @@ async function buildPayload(body = {}, database) {
   const shiftId = toObjectId(body.shiftId || face?.shiftId);
 
   const inTime = normalizeTime(body.inTime || body.checkInTime || "");
+  const lunchOut = normalizeTime(
+    body.lunchOut || body.lunchOutTime || body.lunch_out || "",
+  );
+  const lunchIn = normalizeTime(
+    body.lunchIn || body.lunchInTime || body.lunch_in || "",
+  );
   const outTime = normalizeTime(body.outTime || body.checkOutTime || "");
 
-  const expectedInTime = normalizeTime(body.expectedInTime || "");
-  const expectedOutTime = normalizeTime(body.expectedOutTime || "");
+  const expectedInTime = normalizeTime(
+    body.expectedInTime || shiftDay?.inTime || "",
+  );
+  const expectedLunchOut = normalizeTime(
+    body.expectedLunchOut ||
+      body.expectedLunchOutTime ||
+      shiftDay?.lunchOut ||
+      shiftDay?.lunch_out ||
+      "",
+  );
+  const expectedLunchIn = normalizeTime(
+    body.expectedLunchIn ||
+      body.expectedLunchInTime ||
+      shiftDay?.lunchIn ||
+      shiftDay?.lunch_in ||
+      "",
+  );
+  const expectedOutTime = normalizeTime(
+    body.expectedOutTime || shiftDay?.outTime || "",
+  );
 
   const lateByMinutes =
     body.lateByMinutes !== undefined
@@ -355,6 +444,21 @@ async function buildPayload(body = {}, database) {
           expectedInTime,
           expectedOutTime,
         });
+
+  const lunchLateMinutes =
+    body.lunchLateMinutes !== undefined
+      ? num(body.lunchLateMinutes)
+      : calculateLunchLate({
+          lunchOut,
+          lunchIn,
+          outTime,
+          expectedLunchIn,
+        });
+
+  const lunchDeductionMinutes =
+    body.lunchDeductionMinutes !== undefined
+      ? num(body.lunchDeductionMinutes)
+      : lunchLateMinutes;
 
   const isHalfDay =
     bool(body.isHalfDay) ||
@@ -409,10 +513,17 @@ async function buildPayload(body = {}, database) {
     attendanceDate: date,
 
     inTime,
+    lunchOut,
+    lunchIn,
     outTime,
 
     expectedInTime,
+    expectedLunchOut,
+    expectedLunchIn,
     expectedOutTime,
+
+    lunchLateMinutes,
+    lunchDeductionMinutes,
 
     lateByMinutes,
     earlyOutMinutes,
@@ -435,7 +546,21 @@ async function buildPayload(body = {}, database) {
 
     checkInPhotoUrl: str(
       body.checkInPhotoUrl ||
-        (!outTime ? body.photoUri || body.photoUrl || "" : ""),
+        (inTime && !lunchOut && !lunchIn && !outTime
+          ? body.photoUri || body.photoUrl || ""
+          : ""),
+    ),
+
+    lunchOutPhotoUrl: str(
+      body.lunchOutPhotoUrl ||
+        (lunchOut && !lunchIn && !outTime
+          ? body.photoUri || body.photoUrl || ""
+          : ""),
+    ),
+
+    lunchInPhotoUrl: str(
+      body.lunchInPhotoUrl ||
+        (lunchIn && !outTime ? body.photoUri || body.photoUrl || "" : ""),
     ),
 
     checkOutPhotoUrl: str(
@@ -489,6 +614,10 @@ async function buildPayload(body = {}, database) {
     markedAt: str(body.markedAt || new Date().toISOString()),
 
     checkInAt: str(body.checkInAt || (inTime ? new Date().toISOString() : "")),
+    lunchOutAt: str(
+      body.lunchOutAt || (lunchOut ? new Date().toISOString() : ""),
+    ),
+    lunchInAt: str(body.lunchInAt || (lunchIn ? new Date().toISOString() : "")),
     checkOutAt: str(
       body.checkOutAt || (outTime ? new Date().toISOString() : ""),
     ),
@@ -547,12 +676,21 @@ export const createAttendance = async (req, res) => {
       existing.salary = payload.salary || existing.salary;
 
       if (payload.inTime) existing.inTime = payload.inTime;
+      if (payload.lunchOut) existing.lunchOut = payload.lunchOut;
+      if (payload.lunchIn) existing.lunchIn = payload.lunchIn;
       if (payload.outTime) existing.outTime = payload.outTime;
 
       existing.expectedInTime =
         payload.expectedInTime || existing.expectedInTime;
+      existing.expectedLunchOut =
+        payload.expectedLunchOut || existing.expectedLunchOut;
+      existing.expectedLunchIn =
+        payload.expectedLunchIn || existing.expectedLunchIn;
       existing.expectedOutTime =
         payload.expectedOutTime || existing.expectedOutTime;
+
+      existing.lunchLateMinutes = payload.lunchLateMinutes;
+      existing.lunchDeductionMinutes = payload.lunchDeductionMinutes;
 
       existing.lateByMinutes = payload.lateByMinutes;
       existing.earlyOutMinutes = payload.earlyOutMinutes;
@@ -574,6 +712,14 @@ export const createAttendance = async (req, res) => {
 
       if (payload.checkInPhotoUrl && !payload.outTime) {
         existing.checkInPhotoUrl = payload.checkInPhotoUrl;
+      }
+
+      if (payload.lunchOutPhotoUrl) {
+        existing.lunchOutPhotoUrl = payload.lunchOutPhotoUrl;
+      }
+
+      if (payload.lunchInPhotoUrl) {
+        existing.lunchInPhotoUrl = payload.lunchInPhotoUrl;
       }
 
       if (payload.checkOutPhotoUrl || (payload.photoUrl && payload.outTime)) {
@@ -600,6 +746,14 @@ export const createAttendance = async (req, res) => {
 
       if (payload.inTime && !existing.checkInAt) {
         existing.checkInAt = payload.checkInAt;
+      }
+
+      if (payload.lunchOut && !existing.lunchOutAt) {
+        existing.lunchOutAt = payload.lunchOutAt;
+      }
+
+      if (payload.lunchIn && !existing.lunchInAt) {
+        existing.lunchInAt = payload.lunchInAt;
       }
 
       if (payload.outTime) {
@@ -749,10 +903,17 @@ export const updateAttendance = async (req, res) => {
     row.attendanceDate = payload.attendanceDate;
 
     row.inTime = payload.inTime;
+    row.lunchOut = payload.lunchOut;
+    row.lunchIn = payload.lunchIn;
     row.outTime = payload.outTime;
 
     row.expectedInTime = payload.expectedInTime;
+    row.expectedLunchOut = payload.expectedLunchOut;
+    row.expectedLunchIn = payload.expectedLunchIn;
     row.expectedOutTime = payload.expectedOutTime;
+
+    row.lunchLateMinutes = payload.lunchLateMinutes;
+    row.lunchDeductionMinutes = payload.lunchDeductionMinutes;
 
     row.lateByMinutes = payload.lateByMinutes;
     row.earlyOutMinutes = payload.earlyOutMinutes;
@@ -773,6 +934,8 @@ export const updateAttendance = async (req, res) => {
     row.halfDayTime = payload.halfDayTime;
 
     row.checkInPhotoUrl = payload.checkInPhotoUrl || row.checkInPhotoUrl;
+    row.lunchOutPhotoUrl = payload.lunchOutPhotoUrl || row.lunchOutPhotoUrl;
+    row.lunchInPhotoUrl = payload.lunchInPhotoUrl || row.lunchInPhotoUrl;
     row.checkOutPhotoUrl = payload.checkOutPhotoUrl || row.checkOutPhotoUrl;
     row.photoUrl = payload.photoUrl || row.photoUrl;
 
@@ -790,6 +953,12 @@ export const updateAttendance = async (req, res) => {
     row.markedAt = payload.markedAt;
 
     if (payload.inTime && !row.checkInAt) row.checkInAt = payload.checkInAt;
+    if (payload.lunchOut && !row.lunchOutAt) {
+      row.lunchOutAt = payload.lunchOutAt;
+    }
+    if (payload.lunchIn && !row.lunchInAt) {
+      row.lunchInAt = payload.lunchInAt;
+    }
     if (payload.outTime) row.checkOutAt = payload.checkOutAt;
 
     row.salaryPaymentMonth = payload.salaryPaymentMonth || row.date.slice(0, 7);

@@ -1,49 +1,86 @@
+// File: model/createEmployee.model.js
+
 import mongoose from "mongoose";
 
-const employeeSchema = new mongoose.Schema({
+const employeeSchema = new mongoose.Schema(
+  {
     created_by: {
-        type: String
+      type: String,
     },
+
     database: {
-        type: String
+      type: String,
+      index: true,
     },
+
     Image: {
-        type: String
+      type: String,
     },
+
     Name: {
-        type: String
+      type: String,
     },
+
     DOB: {
-        type: String
+      type: String,
     },
+
     Address: {
-        type: String
+      type: String,
     },
+
     Email: {
-        type: String
+      type: String,
     },
+
     Password: {
-        type: String
+      type: String,
     },
+
     Contact: {
-        type: String
+      type: String,
+      index: true,
     },
+
     Designation: {
-        type: String
+      type: String,
     },
+
     AadharNo: {
-        type: String
+      type: String,
+      index: true,
     },
+
     PanNo: {
-        type: String
+      type: String,
+      uppercase: true,
+      index: true,
     },
+
+    Salary: {
+      type: String,
+      default: "",
+    },
+
+    salaryType: {
+      type: String,
+      enum: ["Monthly", "Daily", "Hourly"],
+      default: "Monthly",
+      index: true,
+    },
+
     ReferalName: {
-        type: String
+      type: String,
     },
+
     ReferalContactNo: {
-        type: String
+      type: String,
     },
+  },
+  {
+    timestamps: true,
+  },
+);
 
-}, { timestamps: true });
-
-export const Employee = mongoose.model("employee", employeeSchema);
+export const Employee =
+  mongoose.models.employee || mongoose.model("employee", employeeSchema);

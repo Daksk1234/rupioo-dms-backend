@@ -63,6 +63,13 @@ const hrmFaceSchema = new mongoose.Schema(
       default: "",
     },
 
+    salaryType: {
+      type: String,
+      enum: ["Monthly", "Daily", "Hourly"],
+      default: "Monthly",
+      index: true,
+    },
+
     photoUrl: {
       type: String,
       default: "",

@@ -1,7 +1,9 @@
 // File: controller/hrmFace.controller.js
+
 import mongoose from "mongoose";
 import { HrmFace } from "../model/hrmFace.model.js";
 import HrmEmployeesApp from "../model/hrmEmployeesApp.model.js";
+import { Employee } from "../model/createEmployee.model.js";
 import {
   cleanDatabase,
   fail,
@@ -33,6 +35,14 @@ function normalizeStatus(value, fallback = "Active") {
   return "Active";
 }
 
+function normalizeSalaryType(value, fallback = "Monthly") {
+  const text = cleanText(value || fallback).toLowerCase();
+
+  if (text === "daily" || text === "day") return "Daily";
+  if (text === "hourly" || text === "hour") return "Hourly";
+  return "Monthly";
+}
+
 function objectIdOrNull(value) {
   return isValidObjectId(value) ? new mongoose.Types.ObjectId(value) : null;
 }
@@ -47,6 +57,9 @@ const buildPayload = (body = {}, database) => ({
   mobileNumber: cleanDigits(body.mobileNumber || body.mobile || body.phone),
   nameSnapshot: cleanText(body.nameSnapshot || body.name || body.employeeName),
   salary: body.salary == null ? "" : String(body.salary),
+  salaryType: normalizeSalaryType(
+    body.salaryType || body.payType || body.paymentType,
+  ),
   imageMimeType: body.imageMimeType || "image/jpeg",
   embedding: parseArrayNumber(body.embedding),
   embeddings: parseJsonArray(body.embeddings, []),
@@ -68,11 +81,12 @@ function applyFacePayload(row, payload) {
   }
 
   row.shiftId = objectIdOrNull(payload.shiftId);
-
   row.panNumber = payload.panNumber || "";
   row.aadharNumber = payload.aadharNumber || "";
+  row.mobileNumber = payload.mobileNumber || "";
   row.nameSnapshot = payload.nameSnapshot || "";
   row.salary = payload.salary || "";
+  row.salaryType = normalizeSalaryType(payload.salaryType);
   row.imageMimeType = payload.imageMimeType || "image/jpeg";
   row.embedding = payload.embedding || [];
   row.embeddings = payload.embeddings || [];
@@ -115,6 +129,37 @@ function employeeMatchQueryFromFace(face) {
   };
 }
 
+function legacyEmployeeMatchQueryFromFace(face) {
+  const or = [];
+
+  if (face.userId && isValidObjectId(face.userId)) {
+    or.push({ _id: face.userId });
+  }
+
+  if (face.employeeId && isValidObjectId(face.employeeId)) {
+    or.push({ _id: face.employeeId });
+  }
+
+  if (cleanPan(face.panNumber)) {
+    or.push({ PanNo: cleanPan(face.panNumber) });
+  }
+
+  if (cleanDigits(face.aadharNumber)) {
+    or.push({ AadharNo: cleanDigits(face.aadharNumber) });
+  }
+
+  if (cleanDigits(face.mobileNumber)) {
+    or.push({ Contact: cleanDigits(face.mobileNumber) });
+  }
+
+  if (!or.length) return null;
+
+  return {
+    database: face.database,
+    $or: or,
+  };
+}
+
 async function syncEmployeeFromFace(face) {
   try {
     if (!face || !face.database || !face._id) return;
@@ -122,28 +167,82 @@ async function syncEmployeeFromFace(face) {
     const faceStatus = normalizeStatus(face.status, "Active");
     if (!["Active", "Inactive"].includes(faceStatus)) return;
 
-    const query = employeeMatchQueryFromFace(face);
-    if (!query) return;
-
     const update = {
       status: faceStatus,
       faceId: String(face._id),
       faceRegistered: true,
       photoUrl: cleanText(face.photoUrl),
       photoUri: cleanText(face.photoUrl),
+      salaryType: normalizeSalaryType(face.salaryType),
     };
 
-    if (cleanText(face.nameSnapshot)) update.name = cleanText(face.nameSnapshot);
-    if (cleanText(face.salary)) update.salary = cleanText(face.salary);
-    if (cleanPan(face.panNumber)) update.pan = cleanPan(face.panNumber);
-    if (cleanDigits(face.aadharNumber)) update.aadhar = cleanDigits(face.aadharNumber);
+    if (cleanText(face.nameSnapshot)) {
+      update.name = cleanText(face.nameSnapshot);
+    }
 
-    await HrmEmployeesApp.findOneAndUpdate(query, update, {
-      new: true,
-      runValidators: true,
-    });
+    if (cleanText(face.salary)) {
+      update.salary = cleanText(face.salary);
+    }
+
+    if (cleanPan(face.panNumber)) {
+      update.pan = cleanPan(face.panNumber);
+    }
+
+    if (cleanDigits(face.aadharNumber)) {
+      update.aadhar = cleanDigits(face.aadharNumber);
+    }
+
+    if (cleanDigits(face.mobileNumber)) {
+      update.mobile = cleanDigits(face.mobileNumber);
+    }
+
+    if (face.shiftId) {
+      update.shiftId = String(face.shiftId);
+    }
+
+    const query = employeeMatchQueryFromFace(face);
+
+    if (query) {
+      await HrmEmployeesApp.findOneAndUpdate(query, update, {
+        new: true,
+        runValidators: true,
+      });
+    }
+
+    const legacyQuery = legacyEmployeeMatchQueryFromFace(face);
+
+    if (legacyQuery) {
+      const legacyUpdate = {
+        salaryType: normalizeSalaryType(face.salaryType),
+      };
+
+      if (cleanText(face.nameSnapshot)) {
+        legacyUpdate.Name = cleanText(face.nameSnapshot);
+      }
+
+      if (cleanText(face.salary)) {
+        legacyUpdate.Salary = cleanText(face.salary);
+      }
+
+      if (cleanPan(face.panNumber)) {
+        legacyUpdate.PanNo = cleanPan(face.panNumber);
+      }
+
+      if (cleanDigits(face.aadharNumber)) {
+        legacyUpdate.AadharNo = cleanDigits(face.aadharNumber);
+      }
+
+      if (cleanDigits(face.mobileNumber)) {
+        legacyUpdate.Contact = cleanDigits(face.mobileNumber);
+      }
+
+      await Employee.findOneAndUpdate(legacyQuery, legacyUpdate, {
+        new: true,
+        runValidators: true,
+      });
+    }
   } catch (error) {
-    console.log("Face -> employee status sync failed:", error?.message || error);
+    console.log("Face -> employee sync failed:", error?.message || error);
   }
 }
 
@@ -170,11 +269,15 @@ export const createFace = async (req, res) => {
 
     if (existing) {
       applyFacePayload(existing, payload);
-
       existing.status = normalizeStatus(req.body.status, "Active");
 
-      if (img.photoUrl) existing.photoUrl = img.photoUrl;
-      if (img.photoFileName) existing.photoFileName = img.photoFileName;
+      if (img.photoUrl) {
+        existing.photoUrl = img.photoUrl;
+      }
+
+      if (img.photoFileName) {
+        existing.photoFileName = img.photoFileName;
+      }
 
       await existing.save();
       await syncEmployeeFromFace(existing);
@@ -197,8 +300,8 @@ export const createFace = async (req, res) => {
     await syncEmployeeFromFace(face);
 
     return success(res, "Face saved successfully.", face);
-  } catch (e) {
-    return fail(res, 500, "Unable to save face.", e);
+  } catch (error) {
+    return fail(res, 500, "Unable to save face.", error);
   }
 };
 
@@ -214,8 +317,8 @@ export const listFaces = async (req, res) => {
       .lean();
 
     return success(res, "Face list fetched successfully.", rows);
-  } catch (e) {
-    return fail(res, 500, "Unable to fetch face list.", e);
+  } catch (error) {
+    return fail(res, 500, "Unable to fetch face list.", error);
   }
 };
 
@@ -233,11 +336,13 @@ export const getFaceById = async (req, res) => {
       status: { $ne: "Deleted" },
     }).lean();
 
-    if (!row) return fail(res, 404, "Face not found.");
+    if (!row) {
+      return fail(res, 404, "Face not found.");
+    }
 
     return success(res, "Face fetched successfully.", row);
-  } catch (e) {
-    return fail(res, 500, "Unable to fetch face.", e);
+  } catch (error) {
+    return fail(res, 500, "Unable to fetch face.", error);
   }
 };
 
@@ -255,7 +360,9 @@ export const updateFace = async (req, res) => {
       status: { $ne: "Deleted" },
     });
 
-    if (!row) return fail(res, 404, "Face not found.");
+    if (!row) {
+      return fail(res, 404, "Face not found.");
+    }
 
     const payload = buildPayload(
       {
@@ -264,9 +371,11 @@ export const updateFace = async (req, res) => {
         userId: req.body?.userId ?? row.userId,
         employeeId: req.body?.employeeId ?? row.employeeId,
         shiftId: req.body?.shiftId ?? row.shiftId,
+        salaryType: req.body?.salaryType ?? row.salaryType,
       },
       database,
     );
+
     const img = await uploadedImageData(req, row.photoUrl || "");
 
     applyFacePayload(row, payload);
@@ -275,15 +384,20 @@ export const updateFace = async (req, res) => {
       row.status = normalizeStatus(req.body.status, row.status || "Active");
     }
 
-    if (img.photoUrl) row.photoUrl = img.photoUrl;
-    if (img.photoFileName) row.photoFileName = img.photoFileName;
+    if (img.photoUrl) {
+      row.photoUrl = img.photoUrl;
+    }
+
+    if (img.photoFileName) {
+      row.photoFileName = img.photoFileName;
+    }
 
     await row.save();
     await syncEmployeeFromFace(row);
 
     return success(res, "Face updated successfully.", row);
-  } catch (e) {
-    return fail(res, 500, "Unable to update face.", e);
+  } catch (error) {
+    return fail(res, 500, "Unable to update face.", error);
   }
 };
 
@@ -307,15 +421,17 @@ export const updateFaceStatus = async (req, res) => {
       status: { $ne: "Deleted" },
     });
 
-    if (!row) return fail(res, 404, "Face not found.");
+    if (!row) {
+      return fail(res, 404, "Face not found.");
+    }
 
     row.status = status;
     await row.save();
     await syncEmployeeFromFace(row);
 
     return success(res, `Face marked ${status}.`, row);
-  } catch (e) {
-    return fail(res, 500, "Unable to update face status.", e);
+  } catch (error) {
+    return fail(res, 500, "Unable to update face status.", error);
   }
 };
 
@@ -333,13 +449,15 @@ export const deleteFace = async (req, res) => {
       status: { $ne: "Deleted" },
     });
 
-    if (!row) return fail(res, 404, "Face not found.");
+    if (!row) {
+      return fail(res, 404, "Face not found.");
+    }
 
     row.status = "Deleted";
     await row.save();
 
     return success(res, "Face deleted successfully.", row);
-  } catch (e) {
-    return fail(res, 500, "Unable to delete face.", e);
+  } catch (error) {
+    return fail(res, 500, "Unable to delete face.", error);
   }
 };
