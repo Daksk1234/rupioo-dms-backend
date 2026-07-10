@@ -105,7 +105,7 @@ export const ViewWarehouseForProduct = async (req, res, next) => {
     let warehouse = await Warehouse.find({
       database: req.params.database,
       status: "Active",
-      assignStatus: false,
+      // assignStatus: false,
     })
       .sort({ sortorder: -1 })
       .populate({ path: "productItems.productId", model: "product" })

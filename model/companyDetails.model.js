@@ -180,5 +180,4 @@ const CompanySchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-export const CompanyDetails = mongoose.mode;
-("companyDetail", CompanySchema);
+export const CompanyDetails = mongoose.model("companyDetail", CompanySchema);

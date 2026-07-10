@@ -452,6 +452,23 @@ export const SaveUser = async (req, res, next) => {
       }
     }
 
+    if (req.body.openingFinancialYear) {
+      req.body.openingFinancialYear = normalizeOpeningFinancialYear(
+        req.body.openingFinancialYear,
+      );
+    }
+
+    /**
+     * Ledger/account page also saves into User collection.
+     * It has account but no rolename.
+     * So it must not consume subscription user limit and must not create salary.
+     */
+    const isLedgerAccount = !!req.body.account && !req.body.rolename;
+
+    let shouldIncrementSuperAdminUserCount = false;
+    let superAdminForUserCount = null;
+    let superAdminRoleIdForUserCount = null;
+
     if (req.body.subscriptionPlan) {
       const sub = await Subscription.findById(req.body.subscriptionPlan);
 
@@ -466,39 +483,51 @@ export const SaveUser = async (req, res, next) => {
         req.body.userAllotted = sub.noOfUser;
         req.body.planStatus = "paid";
       }
-    } else {
+    } else if (!isLedgerAccount) {
       const existRole = await Role.findOne({ roleName: "SuperAdmin" });
 
       if (!existRole) {
         console.log("Role Not Found");
-      }
-
-      const existingSuperAdmin = await User.findOne({
-        database: req.body.database,
-        rolename: existRole?._id?.toString(),
-      });
-
-      if (!existingSuperAdmin) {
-        console.log("user not found");
       } else {
-        if (existingSuperAdmin.planStatus !== "paid") {
-          return res.status(404).json({
-            message: "User is not subscribed to the plan",
-            status: false,
-          });
-        } else {
-          existingSuperAdmin.userRegister += 1;
+        superAdminRoleIdForUserCount = existRole._id;
 
-          if (
-            existingSuperAdmin.userRegister <= existingSuperAdmin.userAllotted
-          ) {
-            await existingSuperAdmin.save();
-          } else {
+        const existingSuperAdmin = await User.findOne({
+          database: req.body.database,
+          rolename: existRole._id,
+        })
+          .select("_id database rolename planStatus userRegister userAllotted")
+          .lean();
+
+        if (!existingSuperAdmin) {
+          console.log("user not found");
+        } else {
+          if (existingSuperAdmin.planStatus !== "paid") {
+            return res.status(404).json({
+              message: "User is not subscribed to the plan",
+              status: false,
+            });
+          }
+
+          const currentUserRegister = Number(
+            existingSuperAdmin.userRegister || 0,
+          );
+          const currentUserAllotted = Number(
+            existingSuperAdmin.userAllotted || 0,
+          );
+
+          if (currentUserRegister + 1 > currentUserAllotted) {
             return res.status(400).json({
               message: "You have reached your plan's user limit",
               status: false,
             });
           }
+
+          /**
+           * Do not update count before creating user.
+           * First create user successfully, then increment count.
+           */
+          shouldIncrementSuperAdminUserCount = true;
+          superAdminForUserCount = existingSuperAdmin;
         }
       }
     }
@@ -523,12 +552,6 @@ export const SaveUser = async (req, res, next) => {
       req.body.warehouse = await JSON.parse(req.body.warehouse);
     }
 
-    if (req.body.openingFinancialYear) {
-      req.body.openingFinancialYear = normalizeOpeningFinancialYear(
-        req.body.openingFinancialYear,
-      );
-    }
-
     if (req.body.isHRM !== undefined) {
       req.body.isHRM =
         req.body.isHRM === true ||
@@ -537,14 +560,77 @@ export const SaveUser = async (req, res, next) => {
     } else {
       req.body.isHRM = false;
     }
+
     const user = await User.create(req.body);
+
+    /**
+     * Safe SuperAdmin count update.
+     * Important: never return error here.
+     * If count update fails, normal user creation should still remain successful.
+     */
+    if (
+      user &&
+      shouldIncrementSuperAdminUserCount &&
+      superAdminForUserCount?._id
+    ) {
+      try {
+        let countUpdated = false;
+
+        const updateFilters = [
+          { _id: superAdminForUserCount._id },
+          {
+            database: req.body.database,
+            rolename: superAdminForUserCount.rolename,
+          },
+          {
+            database: req.body.database,
+            rolename: superAdminRoleIdForUserCount,
+          },
+          {
+            database: req.body.database,
+            rolename: superAdminRoleIdForUserCount?.toString(),
+          },
+        ];
+
+        for (const filter of updateFilters) {
+          const countUpdate = await User.updateOne(filter, {
+            $inc: { userRegister: 1 },
+          });
+
+          if (countUpdate?.matchedCount > 0) {
+            countUpdated = true;
+            break;
+          }
+        }
+
+        if (!countUpdated) {
+          console.log(
+            "Warning: user created but SuperAdmin userRegister was not incremented",
+            {
+              superAdminId: superAdminForUserCount._id,
+              database: req.body.database,
+            },
+          );
+        }
+      } catch (countErr) {
+        console.log(
+          "Warning: user created but SuperAdmin userRegister update failed",
+          countErr,
+        );
+      }
+    }
 
     if (req.body.warehouse) {
       await assingWarehouse(user.warehouse, user._id);
     }
 
     if (user) {
-      await setSalary(user);
+      /**
+       * Ledger account should not create salary.
+       */
+      if (!isLedgerAccount) {
+        await setSalary(user);
+      }
 
       if (user?.rolename) {
         const findRoles = await Role.findById(user.rolename);

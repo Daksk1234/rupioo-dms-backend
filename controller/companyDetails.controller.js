@@ -170,7 +170,7 @@ export const viewCompanyDetails = async (req, res, next) => {
   try {
     const database = req.params.database;
 
-    const adminDetail = await CompanyDetails.findOne({ database });
+    const adminDetail = await CompanyDetails.findOne({ database: database });
 
     return adminDetail
       ? res.status(200).json({

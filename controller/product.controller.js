@@ -197,91 +197,299 @@ export const DeleteProduct = async (req, res, next) => {
       .json({ error: "Internal server error", status: false });
   }
 };
+const hasValue = (value) => {
+  if (value === undefined || value === null) return false;
+
+  const text = String(value).trim();
+
+  return (
+    text !== "" && text !== "undefined" && text !== "null" && text !== "NaN"
+  );
+};
+
+const hasBodyField = (body, key) =>
+  Object.prototype.hasOwnProperty.call(body, key) && hasValue(body[key]);
+
+const toFiniteNumber = (value, fallback = undefined) => {
+  if (!hasValue(value)) return fallback;
+
+  const n = Number(value);
+
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const normalizeObjectIdString = (value) => {
+  if (!value) return "";
+
+  if (typeof value === "object") {
+    if (value._id) return normalizeObjectIdString(value._id);
+    if (value.$oid) return normalizeObjectIdString(value.$oid);
+    if (value.id) return normalizeObjectIdString(value.id);
+  }
+
+  return String(value || "").trim();
+};
+
+const isValidObjectIdString = (value) =>
+  /^[0-9a-fA-F]{24}$/.test(String(value || "").trim());
+
+const removeInvalidNumberFields = (body = {}) => {
+  const numberFields = [
+    "Product_MRP",
+    "SalesRate",
+    "ProfitPercentage",
+    "Purchase_Rate",
+    "price",
+    "GSTRate",
+    "gstPercentage",
+    "Opening_Stock",
+    "openingRate",
+    "MIN_stockalert",
+    "secondarySize",
+    "qty",
+    "landedCost",
+  ];
+
+  numberFields.forEach((field) => {
+    if (!Object.prototype.hasOwnProperty.call(body, field)) return;
+
+    if (!hasValue(body[field])) {
+      delete body[field];
+      return;
+    }
+
+    const n = Number(body[field]);
+
+    if (!Number.isFinite(n)) {
+      delete body[field];
+      return;
+    }
+
+    body[field] = n;
+  });
+
+  return body;
+};
 export const UpdateProduct = async (req, res, next) => {
   try {
-    let groupDiscount = 0;
-    if (req.files) {
-      let images = [];
-      req.files.map((file) => {
-        images.push(file.filename);
-      });
-      req.body.Product_image = images;
-    }
     const productId = req.params.id;
+
     const existingProduct = await Product.findById(productId);
+
     if (!existingProduct) {
       return res
         .status(404)
         .json({ error: "product not found", status: false });
-    } else {
-      const group = await CustomerGroup.find({
-        database: existingProduct.database,
-        status: "Active",
+    }
+
+    const body = { ...(req.body || {}) };
+
+    if (req.files && req.files.length > 0) {
+      const images = [];
+
+      req.files.forEach((file) => {
+        images.push(file.filename);
       });
-      if (group.length > 0) {
-        const maxDiscount = group.reduce((max, group) => {
-          return group.discount > max.discount ? group : max;
-        });
-        groupDiscount = maxDiscount?.discount ? maxDiscount?.discount : 0;
+
+      body.Product_image = images;
+    }
+
+    removeInvalidNumberFields(body);
+
+    let groupDiscount = 0;
+
+    const group = await CustomerGroup.find({
+      database: existingProduct.database,
+      status: "Active",
+    });
+
+    if (group.length > 0) {
+      const maxDiscount = group.reduce((max, groupItem) => {
+        return groupItem.discount > max.discount ? groupItem : max;
+      });
+
+      groupDiscount = Number(maxDiscount?.discount) || 0;
+    }
+
+    const updateData = { ...body };
+
+    const purchaseRateWasSent = hasBodyField(req.body, "Purchase_Rate");
+    const gstWasSent = hasBodyField(req.body, "GSTRate");
+    const profitWasSent = hasBodyField(req.body, "ProfitPercentage");
+
+    const existingPurchaseRate = toFiniteNumber(
+      existingProduct.Purchase_Rate,
+      toFiniteNumber(existingProduct.landedCost, 0),
+    );
+
+    const existingLandedCost = toFiniteNumber(
+      existingProduct.landedCost,
+      existingPurchaseRate,
+    );
+
+    const incomingPurchaseRate = toFiniteNumber(
+      req.body.Purchase_Rate,
+      existingPurchaseRate,
+    );
+
+    const effectiveGSTRate = toFiniteNumber(
+      req.body.GSTRate,
+      toFiniteNumber(existingProduct.GSTRate, 0),
+    );
+
+    const effectiveProfitPercentage = toFiniteNumber(
+      req.body.ProfitPercentage,
+      toFiniteNumber(existingProduct.ProfitPercentage, 3),
+    );
+
+    /*
+      Only recalculate price/MRP when price/GST/profit is actually sent.
+      This is important because the Fix Products button sends only
+      category/unit fields, not full product pricing fields.
+    */
+    if (purchaseRateWasSent || gstWasSent || profitWasSent) {
+      let finalPurchaseRate = incomingPurchaseRate;
+      let finalLandedCost = existingLandedCost;
+
+      if (purchaseRateWasSent) {
+        if (incomingPurchaseRate > existingLandedCost) {
+          finalLandedCost = incomingPurchaseRate;
+          finalPurchaseRate = incomingPurchaseRate;
+        } else {
+          finalPurchaseRate = existingLandedCost;
+        }
+
+        updateData.Purchase_Rate = finalPurchaseRate;
+        updateData.price = finalPurchaseRate;
+        updateData.landedCost = finalLandedCost;
       }
-      if (parseInt(req.body.Purchase_Rate) > existingProduct.landedCost) {
-        req.body.landedCost = parseInt(req.body.Purchase_Rate);
-        req.body.Purchase_Rate = parseInt(req.body.Purchase_Rate);
-      } else {
-        req.body.Purchase_Rate = existingProduct.landedCost;
-      }
+
+      const profit =
+        !effectiveProfitPercentage || effectiveProfitPercentage === 0
+          ? 3
+          : effectiveProfitPercentage;
+
+      updateData.ProfitPercentage = profit;
+      updateData.SalesRate = finalPurchaseRate * (1 + profit / 100);
+      updateData.Product_MRP =
+        updateData.SalesRate *
+        (1 + effectiveGSTRate / 100) *
+        (1 + groupDiscount / 100);
+
+      updateData.GSTRate = effectiveGSTRate;
+      updateData.gstPercentage = effectiveGSTRate;
+
+      removeInvalidNumberFields(updateData);
+    }
+
+    /*
+      Only update warehouse stock when Opening_Stock is actually sent.
+      Earlier code compared existing opening stock with parseInt(undefined),
+      which always caused wrong warehouse update during partial product fixes.
+    */
+    if (hasBodyField(req.body, "Opening_Stock")) {
+      const oldOpeningStock = toFiniteNumber(existingProduct.Opening_Stock, 0);
+      const newOpeningStock = toFiniteNumber(
+        req.body.Opening_Stock,
+        oldOpeningStock,
+      );
+
       if (
-        !req.body.ProfitPercentage ||
-        parseInt(req.body.ProfitPercentage) === 0
+        Number.isFinite(newOpeningStock) &&
+        newOpeningStock !== oldOpeningStock
       ) {
-        req.body.SalesRate = req.body.Purchase_Rate * 1.03;
-        req.body.ProfitPercentage = 3;
-        req.body.Product_MRP =
-          req.body.SalesRate *
-          (1 + parseInt(req.body.GSTRate) / 100) *
-          (1 + groupDiscount / 100);
-      } else {
-        req.body.SalesRate =
-          req.body.Purchase_Rate *
-          (1 + parseInt(req.body.ProfitPercentage) / 100);
-        req.body.Product_MRP =
-          req.body.SalesRate *
-          (1 + parseInt(req.body.GSTRate) / 100) *
-          (1 + groupDiscount / 100);
-      }
-      if (existingProduct.Opening_Stock !== parseInt(req.body.Opening_Stock)) {
-        const qty = req.body.Opening_Stock - existingProduct.Opening_Stock;
-        req.body.qty = existingProduct.qty + qty;
+        const oldQty = toFiniteNumber(existingProduct.qty, 0);
+        const diffQty = newOpeningStock - oldOpeningStock;
+
+        updateData.Opening_Stock = newOpeningStock;
+        updateData.qty = oldQty + diffQty;
+
+        const incomingWarehouseId = normalizeObjectIdString(req.body.warehouse);
+        const existingWarehouseId = normalizeObjectIdString(
+          existingProduct.warehouse,
+        );
+        const warehouseId = incomingWarehouseId || existingWarehouseId;
+
+        if (!isValidObjectIdString(warehouseId)) {
+          return res.status(400).json({
+            message: "Valid warehouse is required to update opening stock",
+            status: false,
+          });
+        }
+
         await addProductInWarehouse(
-          req.body,
-          req.body.warehouse,
+          {
+            ...existingProduct.toObject(),
+            ...updateData,
+            warehouse: warehouseId,
+            GSTRate: toFiniteNumber(
+              updateData.GSTRate,
+              existingProduct.GSTRate,
+            ),
+            Purchase_Rate: toFiniteNumber(
+              updateData.Purchase_Rate,
+              existingProduct.Purchase_Rate,
+            ),
+            Opening_Stock: newOpeningStock,
+            qty: updateData.qty,
+          },
+          warehouseId,
           existingProduct,
         );
       }
-      if (req.body.Product_Title && req.body.SubCategory && req.body.category) {
-        // let last4 = '';
-        // let existName = req.body.Product_Title.split(" ");
-        // let fname = existName[0];
-        // const hsn = req.body.HSN_Code.trim();
-        // last4 = hsn.slice(-4);
-        req.body.sId = `${req.body.category}-${req.body.SubCategory}-${req.body.Product_Title}`;
-      }
-      req.body = applyOpeningFinancialYear(req.body);
-      const updatedProduct = req.body;
-      const product = await Product.findByIdAndUpdate(
-        productId,
-        updatedProduct,
-        { new: true },
-      );
-      return res
-        .status(200)
-        .json({ message: "Product Updated Successfully", status: true });
     }
+
+    /*
+      If warehouse is sent as populated object by mistake, convert it to ObjectId string.
+      If no warehouse is sent, do not touch existing warehouse.
+    */
+    if (Object.prototype.hasOwnProperty.call(updateData, "warehouse")) {
+      const warehouseId = normalizeObjectIdString(updateData.warehouse);
+
+      if (warehouseId && isValidObjectIdString(warehouseId)) {
+        updateData.warehouse = warehouseId;
+      } else {
+        delete updateData.warehouse;
+      }
+    }
+
+    const finalCategory = hasValue(updateData.category)
+      ? updateData.category
+      : existingProduct.category;
+
+    const finalSubCategory = hasValue(updateData.SubCategory)
+      ? updateData.SubCategory
+      : existingProduct.SubCategory;
+
+    const finalProductTitle = hasValue(updateData.Product_Title)
+      ? updateData.Product_Title
+      : existingProduct.Product_Title;
+
+    if (finalProductTitle && finalSubCategory && finalCategory) {
+      updateData.sId = `${finalCategory}-${finalSubCategory}-${finalProductTitle}`;
+    }
+
+    applyOpeningFinancialYear(updateData);
+    removeInvalidNumberFields(updateData);
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      productId,
+      { $set: updateData },
+      { new: true },
+    );
+
+    return res.status(200).json({
+      message: "Product Updated Successfully",
+      status: true,
+      Product: updatedProduct,
+    });
   } catch (err) {
     console.error(err);
-    return res
-      .status(500)
-      .json({ error: "Internal Server Error", status: false });
+
+    return res.status(500).json({
+      error: err?.message || "Internal Server Error",
+      status: false,
+    });
   }
 };
 
