@@ -15,19 +15,22 @@ import {
   updatePurchaseOrder,
   updatePurchaseOrderStatus,
   sendPurchaseOrderMail,
+  createCompletedPurchaseOrder,
 } from "../controller/purchageOrder.controller.js";
 
 const router = express.Router();
 const upload = multer({ dest: "public/Images/" });
 
 router.post("/save-purchase-order", purchaseOrder);
-router.post("/purchase-invoice-order", purchaseInvoiceOrder);
+router.post("/purchase-invoice-order/:id", purchaseInvoiceOrder);
+router.post("/purchase-invoice-order-direct", createCompletedPurchaseOrder);
+// router.post("/purchase-invoice-order", purchaseInvoiceOrder);
 router.put("/purchase-order-update/:orderId", UpdatePurchaseInvoiceOrder);
 router.post("/dipatch-purchase-order/:id", PurchaseOrderDispatch);
 router.get("/view-purchase-order-history/:id/:database", purchaseOrderHistory);
 router.get(
   "/view-purchase-order-history-by-id/:id",
-  purchaseOrderHistoryByOrderId
+  purchaseOrderHistoryByOrderId,
 );
 router.put("/update-purchase-order/:id", updatePurchaseOrder);
 router.put("/update-purchase-order-status/:id", updatePurchaseOrderStatus);

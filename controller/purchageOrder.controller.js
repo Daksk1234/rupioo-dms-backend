@@ -12,215 +12,874 @@ import { ledgerPartyForCredit } from "../service/ledger.js";
 import { Stock } from "../model/stock.js";
 import { Customer } from "../model/customer.model.js";
 
-// controllers/... (your purchaseOrder handler)
-export const purchaseOrder = async (req, res, next) => {
-  try {
-    const orderItems = req.body.orderItems;
-    const user = await User.findOne({ _id: req.body.userId });
-    if (!user) {
-      return res.status(401).json({ message: "No user found", status: false });
-    }
+// Put these helpers above the purchaseOrder controller in the same controller file.
 
-    // (existing product checks unchanged)
-    for (const orderItem of orderItems) {
-      const product = await Product.findOne({ _id: orderItem.productId });
-      if (!product) {
-        return res
-          .status(404)
-          .json(`Product with ID ${orderItem.productId} not found`);
-      }
-    }
+const normalizePurchaseOrderNumber = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
 
-    // ✅ ensure db context on body
-    req.body.userId = user._id;
-
-    // ✅ NEW: PO number = completed count + 2 (scoped to this database)
-    const completedCount = await PurchaseOrder.countDocuments({
-      database: user.database,
-      status: "completed",
-    });
-    req.body.poNumber = String(completedCount + 2);
-
-    const order = await PurchaseOrder.create(req.body);
-    return order
-      ? res.status(200).json({ orderDetail: order, status: true })
-      : res
-          .status(400)
-          .json({ message: "Something Went Wrong", status: false });
-  } catch (err) {
-    // If you enabled the unique index above, handle duplicate gracefully
-    if (err?.code === 11000 && err?.keyPattern?.poNumber) {
-      return res
-        .status(409)
-        .json({ message: "PO number conflict. Please retry.", status: false });
-    }
-    console.log(err);
-    return res.status(500).json({ error: err, status: false });
+  // Numeric PO numbers are always stored as 001, 002, 003...
+  if (/^\d+$/.test(text)) {
+    return String(Number(text)).padStart(3, "0");
   }
+
+  // Custom PO formats are kept as entered.
+  return text;
 };
 
-export const purchaseInvoiceOrder = async (req, res, next) => {
+const extractPurchaseOrderSequence = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  if (/^\d+$/.test(text)) {
+    const parsed = Number(text);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const match = text.match(/(\d+)(?!.*\d)/);
+  if (!match) return null;
+
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getPurchaseOrderNumberValues = (order = {}) =>
+  [
+    order?.poNumber,
+    order?.purchaseOrderNo,
+    order?.PONumber,
+    order?.orderNumber,
+    order?.orderNo,
+    order?.invoice,
+    order?.invoiceId,
+  ].filter((value) => value !== undefined && value !== null && value !== "");
+
+const getNextPurchaseOrderNumber = (orders = []) => {
+  const sequences = (Array.isArray(orders) ? orders : [])
+    .flatMap((order) => getPurchaseOrderNumberValues(order))
+    .map(extractPurchaseOrderSequence)
+    .filter((value) => Number.isInteger(value) && value > 0);
+
+  const nextSequence = sequences.length ? Math.max(...sequences) + 1 : 1;
+  return String(nextSequence).padStart(3, "0");
+};
+
+const isPurchaseOrderNumberUsed = (orders = [], requestedNumber = "") => {
+  const requestedText = normalizePurchaseOrderNumber(requestedNumber);
+  const requestedSequence = extractPurchaseOrderSequence(requestedText);
+
+  if (!requestedText) return false;
+
+  return (Array.isArray(orders) ? orders : []).some((order) =>
+    getPurchaseOrderNumberValues(order).some((storedValue) => {
+      const storedText = normalizePurchaseOrderNumber(storedValue);
+      const storedSequence = extractPurchaseOrderSequence(storedText);
+
+      return (
+        storedText.toLowerCase() === requestedText.toLowerCase() ||
+        (requestedSequence !== null &&
+          storedSequence !== null &&
+          storedSequence === requestedSequence)
+      );
+    }),
+  );
+};
+
+export const purchaseOrder = async (req, res, next) => {
   try {
-    let groupDiscount = 0;
-    const orderItems = req.body.orderItems || [];
-
-    const user = await User.findOne({ _id: req.body.userId });
-    if (!user) {
-      return res.status(401).json({ message: "No user found", status: false });
-    }
-
-    const date1 = new Date();
-    const date2 = new Date(req.body.date);
-    const party = await Customer.findById(req.body.partyId);
-    if (!party) {
-      return res
-        .status(404)
-        .json({ message: "Party not found", status: false });
-    }
-
-    const fyDate = new Date(req.body.date || new Date());
-    const fyMonth = fyDate.getMonth() + 1;
-    const fyYear = fyDate.getFullYear();
-    const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
-    req.body.financialYear =
-      req.body.financialYear ||
-      `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
-
-    // 🔒 Normalize/guard new bill-level fields (don’t fail if missing)
-    // Frontend now sends these; keep defaults if not provided
-    req.body.discountDetails = Array.isArray(req.body.discountDetails)
-      ? req.body.discountDetails
+    const orderItems = Array.isArray(req.body?.orderItems)
+      ? req.body.orderItems
       : [];
 
-    // handle numeric splits on charges GST
-    req.body.ChargesCgst = Number(req.body.ChargesCgst || 0);
-    req.body.ChargesSgst = Number(req.body.ChargesSgst || 0);
-    req.body.ChargesIgst = Number(req.body.ChargesIgst || 0);
-
-    // booleans & totals
-    req.body.igstTaxType =
-      typeof req.body.igstTaxType === "boolean"
-        ? req.body.igstTaxType
-        : Boolean(req.body.igstTaxType);
-
-    req.body.amount = Number(req.body.amount || 0); // taxable after discounts & charges
-    req.body.roundOff = Number(req.body.roundOff || 0);
-    req.body.sgstTotal = Number(req.body.sgstTotal || 0);
-    req.body.cgstTotal = Number(req.body.cgstTotal || 0);
-    req.body.igstTotal = Number(req.body.igstTotal || 0);
-    req.body.grandTotal = Number(req.body.grandTotal || 0);
-
-    // optional compact HSN summary
-    if (req.body.hsnSummary && typeof req.body.hsnSummary === "object") {
-      // leave shape as-is; schema validates fields
-    } else {
-      req.body.hsnSummary = null;
-    }
-
-    // allow any GST details structure
-    if (!Array.isArray(req.body.gstDetails)) req.body.gstDetails = [];
-
-    // ---------- stock updates (unchanged) ----------
-    const applyForDate = async () => {
-      for (const orderItem of orderItems) {
-        const product = await Product.findOne({ _id: orderItem.productId });
-        if (!product) {
-          return res
-            .status(404)
-            .json(`Product with ID ${orderItem.productId} not found`);
-        }
-
-        const group = await CustomerGroup.find({
-          database: product.database,
-          status: "Active",
-        });
-
-        if (group.length > 0) {
-          const maxDiscount = group.reduce((max, g) =>
-            g.discount > max.discount ? g : max,
-          );
-          groupDiscount = maxDiscount.discount;
-        }
-
-        // Purchase Rate & landed cost update
-        // (your original logic had 2 branches; kept behavior with minor cleanup)
-        const landed = Number(orderItem.landedCost || orderItem.price || 0);
-
-        // WHEN same day: set Purchase_Rate = orderItem.price (as in your original first branch)
-        // WHEN backdate: set to landedCost (as in your original second branch)
-        if (date1.toDateString() === date2.toDateString()) {
-          product.Purchase_Rate = Number(orderItem.price);
-        } else {
-          product.Purchase_Rate =
-            product.Purchase_Rate > landed ? product.Purchase_Rate : landed;
-        }
-
-        product.landedCost = landed;
-
-        if (!product.ProfitPercentage || product.ProfitPercentage === 0) {
-          product.SalesRate = product.Purchase_Rate * 1.03;
-          product.Product_MRP =
-            product.SalesRate *
-            (1 + product.GSTRate / 100) *
-            (1 + groupDiscount / 100);
-        } else {
-          product.SalesRate =
-            (product.Purchase_Rate * (100 + product.ProfitPercentage)) / 100;
-          product.Product_MRP =
-            product.SalesRate *
-            (1 + product.GSTRate / 100) *
-            (1 + groupDiscount / 100);
-        }
-
-        product.purchaseDate = new Date();
-        product.partyId.push({
-          partyId: req.body.partyId,
-          purchaseDate: new Date(),
-        });
-        product.purchaseStatus = true;
-        product.qty += Number(orderItem.qty || 0);
-
-        await addProductInWarehouse3(
-          product,
-          product.warehouse,
-          orderItem,
-          req.body.date,
-        );
-        await product.save();
-      }
-      return true;
-    };
-
-    if (date1.toDateString() === date2.toDateString()) {
-      await applyForDate();
-    } else if (date1 > date2) {
-      await applyForDate();
-    } else {
+    if (!orderItems.length) {
       return res.status(400).json({
-        message: "can not purchaseOrder of next date",
+        message: "At least one product is required",
         status: false,
       });
     }
 
-    // ---------- Create order ----------
-    req.body.userId = user._id;
+    const user = await User.findById(req.body.userId);
 
-    const order = await PurchaseOrder.create(req.body);
-    if (order) {
-      const particular = "PurchaseInvoice";
-      await ledgerPartyForCredit(order, particular);
+    if (!user) {
+      return res.status(401).json({
+        message: "No user found",
+        status: false,
+      });
     }
 
-    return order
-      ? res.status(200).json({ orderDetail: order, status: true })
-      : res
-          .status(400)
-          .json({ message: "Something Went Wrong", status: false });
+    // Keep your existing product checks.
+    for (const orderItem of orderItems) {
+      const product = await Product.findById(orderItem.productId);
+
+      if (!product) {
+        return res.status(404).json({
+          message: `Product with ID ${orderItem.productId} not found`,
+          status: false,
+        });
+      }
+    }
+
+    // Purchase orders belong to the financial-year database sent by frontend.
+    const selectedDatabase = String(
+      req.body?.database || user?.database || "",
+    ).trim();
+
+    if (!selectedDatabase) {
+      return res.status(400).json({
+        message: "Database is required",
+        status: false,
+      });
+    }
+
+    const existingOrders = await PurchaseOrder.find({
+      database: selectedDatabase,
+    })
+      .select(
+        "poNumber purchaseOrderNo PONumber orderNumber orderNo invoice invoiceId",
+      )
+      .lean();
+
+    // The frontend sends the same number in all four fields.
+    const requestedNumber = normalizePurchaseOrderNumber(
+      req.body?.poNumber ??
+        req.body?.purchaseOrderNo ??
+        req.body?.orderNumber ??
+        req.body?.invoice,
+    );
+
+    const nextPoNumber = getNextPurchaseOrderNumber(existingOrders);
+
+    if (!requestedNumber) {
+      return res.status(400).json({
+        message: `PO number is required. The next PO number is ${nextPoNumber}.`,
+        nextPoNumber,
+        status: false,
+      });
+    }
+
+    // IMPORTANT: never silently replace the number shown on the page.
+    // If it is already used, tell the frontend the next number and stop.
+    if (isPurchaseOrderNumberUsed(existingOrders, requestedNumber)) {
+      return res.status(409).json({
+        message: `PO number ${requestedNumber} is already used. The next PO number is ${nextPoNumber}. Please submit again.`,
+        nextPoNumber,
+        status: false,
+      });
+    }
+
+    // Save the exact same visible number in every legacy/current field.
+    const payload = {
+      ...req.body,
+      userId: user._id,
+      database: selectedDatabase,
+      invoice: requestedNumber,
+      poNumber: requestedNumber,
+      purchaseOrderNo: requestedNumber,
+      orderNumber: requestedNumber,
+    };
+
+    const order = await PurchaseOrder.create(payload);
+
+    return res.status(200).json({
+      message: "Purchase Order Created Successfully",
+      orderDetail: order,
+      poNumber: requestedNumber,
+      purchaseOrderNo: requestedNumber,
+      invoice: requestedNumber,
+      status: true,
+    });
   } catch (err) {
-    console.log(err);
-    return res
-      .status(500)
-      .json({ error: "Internal Server Error", status: false });
+    // A compound unique index is strongly recommended:
+    // purchaseOrderSchema.index(
+    //   { database: 1, poNumber: 1 },
+    //   {
+    //     unique: true,
+    //     partialFilterExpression: { poNumber: { $type: "string" } },
+    //   },
+    // );
+    if (err?.code === 11000) {
+      try {
+        const selectedDatabase = String(req.body?.database || "").trim();
+        const existingOrders = await PurchaseOrder.find({
+          database: selectedDatabase,
+        })
+          .select(
+            "poNumber purchaseOrderNo PONumber orderNumber orderNo invoice invoiceId",
+          )
+          .lean();
+
+        const nextPoNumber = getNextPurchaseOrderNumber(existingOrders);
+
+        return res.status(409).json({
+          message: `PO number conflict. The next PO number is ${nextPoNumber}. Please submit again.`,
+          nextPoNumber,
+          status: false,
+        });
+      } catch (numberError) {
+        console.error("Unable to resolve next PO number:", numberError);
+      }
+
+      return res.status(409).json({
+        message: "PO number conflict. Please reload and submit again.",
+        status: false,
+      });
+    }
+
+    console.error("purchaseOrder error:", err);
+
+    return res.status(500).json({
+      message: err?.message || "Unable to create purchase order",
+      status: false,
+    });
+  }
+};
+
+const normalizeProductPartyHistory = (product) => {
+  const rawValue =
+    typeof product?.$__getValue === "function"
+      ? product.$__getValue("partyId")
+      : product?.partyId;
+
+  const source = Array.isArray(rawValue)
+    ? rawValue
+    : rawValue
+      ? [rawValue]
+      : [];
+
+  const fallbackDate = product?.purchaseDate || new Date();
+
+  return source
+    .map((entry) => {
+      if (!entry) return null;
+
+      // Old format: partyId: "64..." or partyId: ObjectId("64...")
+      if (
+        typeof entry === "string" ||
+        typeof entry?.toHexString === "function"
+      ) {
+        return {
+          partyId: entry,
+          purchaseDate: fallbackDate,
+        };
+      }
+
+      // Current embedded format:
+      // { partyId: ObjectId/string/populated customer, purchaseDate: Date }
+      const embeddedPartyId =
+        entry?.partyId?._id || entry?.partyId?.$oid || entry?.partyId;
+
+      if (!embeddedPartyId) return null;
+
+      return {
+        partyId: embeddedPartyId,
+        purchaseDate: entry?.purchaseDate || fallbackDate,
+      };
+    })
+    .filter(Boolean);
+};
+
+export const purchaseInvoiceOrder = async (req, res, next) => {
+  try {
+    const orderId = req.params.id;
+
+    if (!orderId) {
+      return res.status(400).json({
+        message: "Purchase order ID is required",
+        status: false,
+      });
+    }
+
+    /*
+      IMPORTANT:
+      Find the existing purchase order.
+
+      Do not use PurchaseOrder.create() here because the purchase order
+      was already created when its status was pending.
+    */
+    const existingOrder = await PurchaseOrder.findById(orderId);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        message: "Purchase order not found",
+        status: false,
+      });
+    }
+
+    /*
+      Prevent stock, ledger and party history from being added twice when
+      the completion request is accidentally called more than once.
+    */
+    if (
+      String(existingOrder.status || "")
+        .trim()
+        .toLowerCase() === "completed"
+    ) {
+      return res.status(200).json({
+        message: "Purchase order is already completed",
+        orderDetail: existingOrder,
+        alreadyCompleted: true,
+        status: true,
+      });
+    }
+
+    let groupDiscount = 0;
+
+    const orderItems = Array.isArray(req.body?.orderItems)
+      ? req.body.orderItems
+      : [];
+
+    if (!orderItems.length) {
+      return res.status(400).json({
+        message: "At least one product is required",
+        status: false,
+      });
+    }
+
+    const user = await User.findById(req.body.userId);
+
+    if (!user) {
+      return res.status(401).json({
+        message: "No user found",
+        status: false,
+      });
+    }
+
+    const party = await Customer.findById(req.body.partyId);
+
+    if (!party) {
+      return res.status(404).json({
+        message: "Party not found",
+        status: false,
+      });
+    }
+
+    const currentDate = new Date();
+    const purchaseDate = new Date(req.body.date || currentDate);
+
+    if (Number.isNaN(purchaseDate.getTime())) {
+      return res.status(400).json({
+        message: "Invalid purchase order date",
+        status: false,
+      });
+    }
+
+    if (purchaseDate > currentDate) {
+      return res.status(400).json({
+        message: "Cannot complete a purchase order for a future date",
+        status: false,
+      });
+    }
+
+    const fyMonth = purchaseDate.getMonth() + 1;
+    const fyYear = purchaseDate.getFullYear();
+    const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+
+    const normalizedBody = {
+      ...req.body,
+
+      userId: user._id,
+      partyId: party._id,
+
+      financialYear:
+        req.body.financialYear ||
+        `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`,
+
+      discountDetails: Array.isArray(req.body.discountDetails)
+        ? req.body.discountDetails
+        : [],
+
+      ChargesCgst: Number(req.body.ChargesCgst || 0),
+      ChargesSgst: Number(req.body.ChargesSgst || 0),
+      ChargesIgst: Number(req.body.ChargesIgst || 0),
+
+      igstTaxType:
+        typeof req.body.igstTaxType === "boolean"
+          ? req.body.igstTaxType
+          : Boolean(Number(req.body.igstTaxType)),
+
+      amount: Number(req.body.amount || 0),
+      roundOff: Number(req.body.roundOff || 0),
+      sgstTotal: Number(req.body.sgstTotal || 0),
+      cgstTotal: Number(req.body.cgstTotal || 0),
+      igstTotal: Number(req.body.igstTotal || 0),
+      grandTotal: Number(req.body.grandTotal || 0),
+
+      hsnSummary:
+        req.body.hsnSummary && typeof req.body.hsnSummary === "object"
+          ? req.body.hsnSummary
+          : null,
+
+      gstDetails: Array.isArray(req.body.gstDetails) ? req.body.gstDetails : [],
+
+      orderItems,
+
+      // This same existing order will become completed.
+      status: "completed",
+    };
+
+    /*
+      Update product quantity, warehouse stock, purchase rate and party
+      purchase history only once.
+    */
+    for (const orderItem of orderItems) {
+      const product = await Product.findById(orderItem.productId);
+
+      if (!product) {
+        return res.status(404).json({
+          message: `Product with ID ${orderItem.productId} not found`,
+          status: false,
+        });
+      }
+
+      const groups = await CustomerGroup.find({
+        database: product.database,
+        status: "Active",
+      });
+
+      if (groups.length > 0) {
+        const maxDiscountGroup = groups.reduce((maximum, current) =>
+          Number(current?.discount || 0) > Number(maximum?.discount || 0)
+            ? current
+            : maximum,
+        );
+
+        groupDiscount = Number(maxDiscountGroup?.discount || 0);
+      } else {
+        groupDiscount = 0;
+      }
+
+      const itemPrice = Number(
+        orderItem.price ?? orderItem.basicPrice ?? orderItem.purchaseRate ?? 0,
+      );
+
+      const landedCost = Number(
+        orderItem.landedCost ?? orderItem.price ?? orderItem.basicPrice ?? 0,
+      );
+
+      if (currentDate.toDateString() === purchaseDate.toDateString()) {
+        product.Purchase_Rate = itemPrice;
+      } else {
+        product.Purchase_Rate = Math.max(
+          Number(product.Purchase_Rate || 0),
+          landedCost,
+        );
+      }
+
+      product.landedCost = landedCost;
+
+      const profitPercentage = Number(product.ProfitPercentage || 0);
+
+      const gstRate = Number(product.GSTRate || 0);
+
+      if (profitPercentage === 0) {
+        product.SalesRate = Number(product.Purchase_Rate || 0) * 1.03;
+      } else {
+        product.SalesRate =
+          (Number(product.Purchase_Rate || 0) * (100 + profitPercentage)) / 100;
+      }
+
+      product.Product_MRP =
+        Number(product.SalesRate || 0) *
+        (1 + gstRate / 100) *
+        (1 + groupDiscount / 100);
+
+      product.purchaseDate = purchaseDate;
+      product.purchaseStatus = true;
+
+      product.qty = Number(product.qty || 0) + Number(orderItem.qty || 0);
+
+      const normalizedPartyHistory = normalizeProductPartyHistory(product);
+
+      normalizedPartyHistory.push({
+        partyId: party._id,
+        purchaseDate,
+      });
+
+      product.set("partyId", normalizedPartyHistory);
+
+      product.markModified("partyId");
+
+      await addProductInWarehouse3(
+        product,
+        product.warehouse,
+        orderItem,
+        normalizedBody.date,
+      );
+
+      await product.save();
+    }
+
+    /*
+      Update the original pending purchase order.
+
+      This is the main duplicate fix.
+    */
+    const protectedFields = {
+      _id: existingOrder._id,
+      createdAt: existingOrder.createdAt,
+    };
+
+    Object.assign(existingOrder, normalizedBody);
+
+    existingOrder._id = protectedFields._id;
+
+    if (protectedFields.createdAt) {
+      existingOrder.createdAt = protectedFields.createdAt;
+    }
+
+    existingOrder.status = "completed";
+
+    const completedOrder = await existingOrder.save();
+
+    /*
+      Do not create the same ledger twice.
+    */
+    const existingLedger = await Ledger.findOne({
+      orderId: completedOrder._id,
+      particular: "PurchaseInvoice",
+    });
+
+    if (existingLedger) {
+      existingLedger.partyId = party._id;
+      existingLedger.date = completedOrder.date;
+      existingLedger.credit = Number(completedOrder.grandTotal || 0);
+
+      await existingLedger.save();
+    } else {
+      await ledgerPartyForCredit(completedOrder, "PurchaseInvoice");
+    }
+
+    return res.status(200).json({
+      message: "Purchase order completed successfully",
+      orderDetail: completedOrder,
+      status: true,
+    });
+  } catch (err) {
+    console.error("PURCHASE INVOICE ORDER ERROR:", err);
+
+    return res.status(500).json({
+      message: err?.message || "Internal Server Error",
+      error: "Internal Server Error",
+      status: false,
+    });
+  }
+};
+export const createCompletedPurchaseOrder = async (req, res, next) => {
+  try {
+    const orderItems = Array.isArray(req.body?.orderItems)
+      ? req.body.orderItems
+      : [];
+
+    if (!orderItems.length) {
+      return res.status(400).json({
+        message: "At least one product is required",
+        status: false,
+      });
+    }
+
+    const user = await User.findById(req.body.userId);
+
+    if (!user) {
+      return res.status(401).json({
+        message: "No user found",
+        status: false,
+      });
+    }
+
+    const party = await Customer.findById(req.body.partyId);
+
+    if (!party) {
+      return res.status(404).json({
+        message: "Party not found",
+        status: false,
+      });
+    }
+
+    const database = String(req.body.database || user.database || "").trim();
+
+    if (!database) {
+      return res.status(400).json({
+        message: "Database is required",
+        status: false,
+      });
+    }
+
+    const currentDate = new Date();
+    const purchaseDate = new Date(req.body.date || currentDate);
+
+    if (Number.isNaN(purchaseDate.getTime())) {
+      return res.status(400).json({
+        message: "Invalid purchase order date",
+        status: false,
+      });
+    }
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    if (purchaseDate > endOfToday) {
+      return res.status(400).json({
+        message: "Cannot create a purchase order for a future date",
+        status: false,
+      });
+    }
+
+    const purchaseOrderNumber = String(
+      req.body.poNumber ||
+        req.body.purchaseOrderNo ||
+        req.body.orderNumber ||
+        req.body.invoice ||
+        "",
+    ).trim();
+
+    if (!purchaseOrderNumber) {
+      return res.status(400).json({
+        message: "Purchase order number is required",
+        status: false,
+      });
+    }
+
+    /*
+      Check before updating stock.
+
+      This prevents the same completed purchase order from being
+      created again when the button is clicked twice.
+    */
+    const duplicateOrder = await PurchaseOrder.findOne({
+      database,
+      $or: [
+        { poNumber: purchaseOrderNumber },
+        { purchaseOrderNo: purchaseOrderNumber },
+        { orderNumber: purchaseOrderNumber },
+        { invoice: purchaseOrderNumber },
+      ],
+    }).lean();
+
+    if (duplicateOrder) {
+      return res.status(409).json({
+        message: `Purchase order ${purchaseOrderNumber} already exists`,
+        orderDetail: duplicateOrder,
+        duplicate: true,
+        status: false,
+      });
+    }
+
+    /*
+      Validate all products before changing any stock.
+    */
+    const productDocuments = [];
+
+    for (const orderItem of orderItems) {
+      const product = await Product.findById(orderItem.productId);
+
+      if (!product) {
+        return res.status(404).json({
+          message: `Product with ID ${orderItem.productId} not found`,
+          status: false,
+        });
+      }
+
+      const quantity = Number(orderItem.qty || 0);
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return res.status(400).json({
+          message: `Invalid quantity for product ${product.Product_Title || orderItem.productId}`,
+          status: false,
+        });
+      }
+
+      productDocuments.push({
+        product,
+        orderItem,
+      });
+    }
+
+    const fyMonth = purchaseDate.getMonth() + 1;
+    const fyYear = purchaseDate.getFullYear();
+    const fyStartYear = fyMonth >= 4 ? fyYear : fyYear - 1;
+
+    const financialYear =
+      req.body.financialYear ||
+      `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+
+    const normalizedBody = {
+      ...req.body,
+
+      userId: user._id,
+      partyId: party._id,
+      database,
+      financialYear,
+
+      invoice: purchaseOrderNumber,
+      poNumber: purchaseOrderNumber,
+      purchaseOrderNo: purchaseOrderNumber,
+      orderNumber: purchaseOrderNumber,
+
+      discountDetails: Array.isArray(req.body.discountDetails)
+        ? req.body.discountDetails
+        : [],
+
+      ChargesCgst: Number(req.body.ChargesCgst || 0),
+
+      ChargesSgst: Number(req.body.ChargesSgst || 0),
+
+      ChargesIgst: Number(req.body.ChargesIgst || 0),
+
+      igstTaxType:
+        typeof req.body.igstTaxType === "boolean"
+          ? req.body.igstTaxType
+          : Boolean(Number(req.body.igstTaxType)),
+
+      basicTotal: Number(req.body.basicTotal || 0),
+
+      amount: Number(req.body.amount || 0),
+
+      taxableAmount: Number(req.body.taxableAmount || req.body.amount || 0),
+
+      discountTotal: Number(req.body.discountTotal || 0),
+
+      chargesTotal: Number(req.body.chargesTotal || 0),
+
+      roundOff: Number(req.body.roundOff || 0),
+
+      roundOffSigned: Number(req.body.roundOffSigned || 0),
+
+      sgstTotal: Number(req.body.sgstTotal || 0),
+
+      cgstTotal: Number(req.body.cgstTotal || 0),
+
+      igstTotal: Number(req.body.igstTotal || 0),
+
+      grandTotal: Number(req.body.grandTotal || 0),
+
+      hsnSummary:
+        req.body.hsnSummary && typeof req.body.hsnSummary === "object"
+          ? req.body.hsnSummary
+          : null,
+
+      hsnData: Array.isArray(req.body.hsnData) ? req.body.hsnData : [],
+
+      gstDetails: Array.isArray(req.body.gstDetails) ? req.body.gstDetails : [],
+
+      orderItems,
+
+      /*
+        This API always creates the new order as completed.
+      */
+      status: "completed",
+    };
+
+    /*
+      Update product master and warehouse stock.
+    */
+    for (const { product, orderItem } of productDocuments) {
+      let groupDiscount = 0;
+
+      const customerGroups = await CustomerGroup.find({
+        database: product.database,
+        status: "Active",
+      });
+
+      if (customerGroups.length > 0) {
+        const maximumDiscountGroup = customerGroups.reduce(
+          (maximum, current) =>
+            Number(current?.discount || 0) > Number(maximum?.discount || 0)
+              ? current
+              : maximum,
+        );
+
+        groupDiscount = Number(maximumDiscountGroup?.discount || 0);
+      }
+
+      const itemPrice = Number(
+        orderItem.price ?? orderItem.basicPrice ?? orderItem.purchaseRate ?? 0,
+      );
+
+      const landedCost = Number(
+        orderItem.landedCost ?? orderItem.price ?? orderItem.basicPrice ?? 0,
+      );
+
+      if (currentDate.toDateString() === purchaseDate.toDateString()) {
+        product.Purchase_Rate = itemPrice;
+      } else {
+        product.Purchase_Rate = Math.max(
+          Number(product.Purchase_Rate || 0),
+          landedCost,
+        );
+      }
+
+      product.landedCost = landedCost;
+
+      const profitPercentage = Number(product.ProfitPercentage || 0);
+
+      const gstRate = Number(product.GSTRate || 0);
+
+      if (profitPercentage === 0) {
+        product.SalesRate = Number(product.Purchase_Rate || 0) * 1.03;
+      } else {
+        product.SalesRate =
+          (Number(product.Purchase_Rate || 0) * (100 + profitPercentage)) / 100;
+      }
+
+      product.Product_MRP =
+        Number(product.SalesRate || 0) *
+        (1 + gstRate / 100) *
+        (1 + groupDiscount / 100);
+
+      product.purchaseDate = purchaseDate;
+      product.purchaseStatus = true;
+
+      product.qty = Number(product.qty || 0) + Number(orderItem.qty || 0);
+
+      const normalizedPartyHistory = normalizeProductPartyHistory(product);
+
+      normalizedPartyHistory.push({
+        partyId: party._id,
+        purchaseDate,
+      });
+
+      product.set("partyId", normalizedPartyHistory);
+
+      product.markModified("partyId");
+
+      await addProductInWarehouse3(
+        product,
+        product.warehouse,
+        orderItem,
+        normalizedBody.date,
+      );
+
+      await product.save();
+    }
+
+    /*
+      Create only one new completed PurchaseOrder document.
+    */
+    const completedOrder = await PurchaseOrder.create(normalizedBody);
+
+    await ledgerPartyForCredit(completedOrder, "PurchaseInvoice");
+
+    return res.status(201).json({
+      message: "Completed purchase order created successfully",
+      orderDetail: completedOrder,
+      status: true,
+    });
+  } catch (err) {
+    console.error("CREATE COMPLETED PURCHASE ORDER ERROR:", err);
+
+    if (err?.code === 11000) {
+      return res.status(409).json({
+        message: "This purchase order already exists",
+        duplicate: true,
+        status: false,
+      });
+    }
+
+    return res.status(500).json({
+      message: err?.message || "Internal Server Error",
+      error: "Internal Server Error",
+      status: false,
+    });
   }
 };
 export const UpdatePurchaseInvoiceOrder = async (req, res, next) => {
