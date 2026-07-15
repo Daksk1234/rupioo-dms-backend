@@ -1806,25 +1806,25 @@ export const deletedSalesOrder = async (req, res, next) => {
     if (!order) {
       return res.status(404).json({ error: "Not Found", status: false });
     }
-    for (const orderItem of order.orderItems) {
-      const product = await Product.findById({ _id: orderItem.productId });
-      if (product) {
-        const warehouse = await Warehouse.findById(product.warehouse);
-        if (warehouse) {
-          const pro = warehouse.productItems.find(
-            (item) => item.productId === orderItem.productId.toString(),
-          );
-          pro.currentStock += orderItem.qty;
-          product.qty += orderItem.qty;
-          product.pendingQty -= orderItem.qty;
-          await warehouse.save();
-          await product.save();
-        }
-        await revertOutWordStock(orderItem, order.date);
-      } else {
-        console.error(`Product With ID ${orderItem.productId} Not Found`);
-      }
-    }
+    // for (const orderItem of order.orderItems) {
+    //   const product = await Product.findById({ _id: orderItem.productId });
+    //   if (product) {
+    //     const warehouse = await Warehouse.findById(product.warehouse);
+    //     if (warehouse) {
+    //       const pro = warehouse.productItems.find(
+    //         (item) => item.productId === orderItem.productId.toString(),
+    //       );
+    //       pro.currentStock += orderItem.qty;
+    //       product.qty += orderItem.qty;
+    //       product.pendingQty -= orderItem.qty;
+    //       await warehouse.save();
+    //       await product.save();
+    //     }
+    //     await revertOutWordStock(orderItem, order.date);
+    //   } else {
+    //     console.error(`Product With ID ${orderItem.productId} Not Found`);
+    //   }
+    // }
     // if (order.status === "completed") {
     //     const party = await Customer.findById(order.partyId)
     //     party.remainingLimit += order.grandTotal;

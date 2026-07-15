@@ -1201,7 +1201,7 @@ export const CashBookReport = async (req, res, next) => {
       }));
 
     const accountDetails = await User.findOne({
-      id: "CASH ACCOUNT-Cash-in-Hand",
+      id: "CASH ACCOUNT-Cash-in-hand",
     });
     const userId = accountDetails?._id;
 
@@ -1259,11 +1259,7 @@ export const CashBookReport = async (req, res, next) => {
 
 export const BankAccountReport = async (req, res, next) => {
   try {
-    const receiptDatabase = req.params.database; // example: ekopack-2026-27
-
-    // Use normal/main database for master data only
-    // ekopack-2026-27 => ekopack
-    // my-company-db-2030-31 => my-company-db
+    const receiptDatabase = req.params.database;
     const mainDatabase = String(receiptDatabase || "").replace(
       /-\d{4}-\d{2}$/,
       "",
