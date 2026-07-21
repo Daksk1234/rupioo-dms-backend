@@ -639,12 +639,6 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
       });
     }
 
-    /*
-      Check before updating stock.
-
-      This prevents the same completed purchase order from being
-      created again when the button is clicked twice.
-    */
     const duplicateOrder = await PurchaseOrder.findOne({
       database,
       $or: [
@@ -664,17 +658,20 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
       });
     }
 
-    /*
-      Validate all products before changing any stock.
-    */
-    const productDocuments = [];
+    /* =====================================================
+       VALIDATE ORDER ITEMS
+
+       IMPORTANT:
+       Do NOT store Product mongoose documents here.
+       The same product can appear multiple times in the invoice.
+    ===================================================== */
+
+    const checkedProductIds = new Set();
 
     for (const orderItem of orderItems) {
-      const product = await Product.findById(orderItem.productId);
-
-      if (!product) {
-        return res.status(404).json({
-          message: `Product with ID ${orderItem.productId} not found`,
+      if (!orderItem?.productId) {
+        return res.status(400).json({
+          message: "Product ID is required",
           status: false,
         });
       }
@@ -683,16 +680,41 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
         return res.status(400).json({
-          message: `Invalid quantity for product ${product.Product_Title || orderItem.productId}`,
+          message: `Invalid quantity for product ${orderItem.productId}`,
           status: false,
         });
       }
 
-      productDocuments.push({
-        product,
-        orderItem,
-      });
+      /*
+       * Only check existence once for duplicate products.
+       *
+       * Example:
+       * Product A - Qty 10 - Price 100
+       * Product A - Qty 20 - Price 90
+       *
+       * Product A only needs one existence check here.
+       */
+      const productId = String(orderItem.productId);
+
+      if (!checkedProductIds.has(productId)) {
+        const productExists = await Product.exists({
+          _id: orderItem.productId,
+        });
+
+        if (!productExists) {
+          return res.status(404).json({
+            message: `Product with ID ${orderItem.productId} not found`,
+            status: false,
+          });
+        }
+
+        checkedProductIds.add(productId);
+      }
     }
+
+    /* =====================================================
+       FINANCIAL YEAR
+    ===================================================== */
 
     const fyMonth = purchaseDate.getMonth() + 1;
     const fyYear = purchaseDate.getFullYear();
@@ -702,11 +724,19 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
       req.body.financialYear ||
       `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
 
+    /* =====================================================
+       NORMALIZED PURCHASE ORDER DATA
+
+       Keep orderItems exactly as separate rows.
+       Same product with different prices/qty will NOT be merged.
+    ===================================================== */
+
     const normalizedBody = {
       ...req.body,
 
       userId: user._id,
       partyId: party._id,
+
       database,
       financialYear,
 
@@ -720,9 +750,7 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
         : [],
 
       ChargesCgst: Number(req.body.ChargesCgst || 0),
-
       ChargesSgst: Number(req.body.ChargesSgst || 0),
-
       ChargesIgst: Number(req.body.ChargesIgst || 0),
 
       igstTaxType:
@@ -730,26 +758,11 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
           ? req.body.igstTaxType
           : Boolean(Number(req.body.igstTaxType)),
 
-      basicTotal: Number(req.body.basicTotal || 0),
-
       amount: Number(req.body.amount || 0),
-
-      taxableAmount: Number(req.body.taxableAmount || req.body.amount || 0),
-
-      discountTotal: Number(req.body.discountTotal || 0),
-
-      chargesTotal: Number(req.body.chargesTotal || 0),
-
       roundOff: Number(req.body.roundOff || 0),
-
-      roundOffSigned: Number(req.body.roundOffSigned || 0),
-
       sgstTotal: Number(req.body.sgstTotal || 0),
-
       cgstTotal: Number(req.body.cgstTotal || 0),
-
       igstTotal: Number(req.body.igstTotal || 0),
-
       grandTotal: Number(req.body.grandTotal || 0),
 
       hsnSummary:
@@ -757,22 +770,57 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
           ? req.body.hsnSummary
           : null,
 
-      hsnData: Array.isArray(req.body.hsnData) ? req.body.hsnData : [],
-
       gstDetails: Array.isArray(req.body.gstDetails) ? req.body.gstDetails : [],
 
+      /*
+       * IMPORTANT:
+       * Keep duplicate products as separate invoice rows.
+       */
       orderItems,
 
-      /*
-        This API always creates the new order as completed.
-      */
       status: "completed",
     };
 
-    /*
-      Update product master and warehouse stock.
-    */
-    for (const { product, orderItem } of productDocuments) {
+    /* =====================================================
+       PROCESS PRODUCTS
+
+       IMPORTANT FIX:
+       Fetch the Product FRESH for every order item.
+
+       If Product A appears twice:
+       Row 1 -> fetch A -> update -> save
+       Row 2 -> fetch A again with latest DB state -> update -> save
+
+       This prevents stale mongoose document/version errors.
+    ===================================================== */
+
+    for (const orderItem of orderItems) {
+      /*
+       * THIS IS THE MAIN FIX.
+       *
+       * Fetch a fresh copy every iteration instead of using
+       * productDocuments created before any saves happened.
+       */
+      const product = await Product.findById(orderItem.productId);
+
+      if (!product) {
+        return res.status(404).json({
+          message: `Product with ID ${orderItem.productId} not found`,
+          status: false,
+        });
+      }
+
+      const quantity = Number(orderItem.qty || 0);
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return res.status(400).json({
+          message: `Invalid quantity for product ${
+            product.Product_Title || orderItem.productId
+          }`,
+          status: false,
+        });
+      }
+
       let groupDiscount = 0;
 
       const customerGroups = await CustomerGroup.find({
@@ -799,6 +847,8 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
         orderItem.landedCost ?? orderItem.price ?? orderItem.basicPrice ?? 0,
       );
 
+      /* ---------------- Purchase Rate ---------------- */
+
       if (currentDate.toDateString() === purchaseDate.toDateString()) {
         product.Purchase_Rate = itemPrice;
       } else {
@@ -809,6 +859,8 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
       }
 
       product.landedCost = landedCost;
+
+      /* ---------------- Sales Rate ---------------- */
 
       const profitPercentage = Number(product.ProfitPercentage || 0);
 
@@ -829,7 +881,26 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
       product.purchaseDate = purchaseDate;
       product.purchaseStatus = true;
 
+      /* ==================================================
+         QTY
+
+         Because we fetched a FRESH product above,
+         duplicate rows correctly accumulate quantity.
+
+         Example:
+         Current qty = 100
+
+         Row 1: qty 10
+         Product saved = 110
+
+         Row 2: fresh Product fetched = 110
+         qty 20 added
+         Product saved = 130
+      ================================================== */
+
       product.qty = Number(product.qty || 0) + Number(orderItem.qty || 0);
+
+      /* ---------------- Party History ---------------- */
 
       const normalizedPartyHistory = normalizeProductPartyHistory(product);
 
@@ -842,6 +913,8 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
 
       product.markModified("partyId");
 
+      /* ---------------- Warehouse ---------------- */
+
       await addProductInWarehouse3(
         product,
         product.warehouse,
@@ -849,12 +922,17 @@ export const createCompletedPurchaseOrder = async (req, res, next) => {
         normalizedBody.date,
       );
 
+      /* ---------------- Save Fresh Product ---------------- */
+
       await product.save();
     }
 
-    /*
-      Create only one new completed PurchaseOrder document.
-    */
+    /* =====================================================
+       CREATE PURCHASE ORDER
+
+       orderItems still contains both separate rows.
+    ===================================================== */
+
     const completedOrder = await PurchaseOrder.create(normalizedBody);
 
     await ledgerPartyForCredit(completedOrder, "PurchaseInvoice");
